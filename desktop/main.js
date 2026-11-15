@@ -83,11 +83,14 @@ const DATA_FILE = () => path.join(app.getPath('userData'), 'foxqueue.json');
 const state = {
   running: false,
   platform: 'windows',
-  config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false },
+  config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true },
   targets: [],
   stats: { alerts: 0, errors: 0, checks: 0 },
   log: [],
+  events: [],   // Drop-Statistik: { t, targetId, name, mode }
+  ringing: null, // laufender Ton-Alarm: { name, url, t }
 };
+let ringTimer = null;
 let loopTimer = null;
 let win = null;
 
@@ -96,13 +99,14 @@ function load() {
   try {
     const d = JSON.parse(fs.readFileSync(DATA_FILE(), 'utf8'));
     state.config = { ...state.config, ...(d.config || {}) };
-    state.targets = (d.targets || []).map(t => ({ ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
+    state.targets = (d.targets || []).map(t => ({ webhook: '', ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
+    state.events = Array.isArray(d.events) ? d.events : [];
   } catch { /* erster Start */ }
 }
 function save() {
-  const targets = state.targets.map(({ id, name, url, mode, keyword, enabled }) => ({ id, name, url, mode, keyword, enabled }));
+  const targets = state.targets.map(({ id, name, url, mode, keyword, enabled, webhook }) => ({ id, name, url, mode, keyword, enabled, webhook: webhook || '' }));
   fs.mkdirSync(path.dirname(DATA_FILE()), { recursive: true });
-  fs.writeFileSync(DATA_FILE(), JSON.stringify({ config: state.config, targets }, null, 2));
+  fs.writeFileSync(DATA_FILE(), JSON.stringify({ config: state.config, targets, events: state.events }, null, 2));
 }
 
 function log(type, msg) {
@@ -111,9 +115,22 @@ function log(type, msg) {
 }
 
 // ---- Alarm ----
-async function alarm(t, title, body) {
-  state.stats.alerts++;
+async function alarm(t, title, body, { test = false } = {}) {
+  if (!test) {
+    state.stats.alerts++;
+    state.events.push({ t: Date.now(), targetId: t.id, name: t.name, mode: t.mode });
+    if (state.events.length > 1000) state.events.splice(0, state.events.length - 1000);
+    save();
+  }
   log('alert', `🦊 ${title}: ${t.name}`);
+
+  // Ton-Alarm: spielt in der Oberfläche, bis gestoppt wird (max. 2 Minuten)
+  if (state.config.sound) {
+    state.ringing = { name: t.name, url: t.url, title, t: Date.now() };
+    clearTimeout(ringTimer);
+    ringTimer = setTimeout(stopAlarm, 120000);
+    if (win) { if (win.isMinimized()) win.restore(); win.showInactive(); }
+  }
 
   if (state.config.notify && Notification.isSupported()) {
     const n = new Notification({ title: `Fox Queue – ${title}`, body: `${t.name}\n${body}`, urgency: 'critical' });
@@ -121,13 +138,19 @@ async function alarm(t, title, body) {
     n.show();
   }
   if (state.config.openBrowser) shell.openExternal(t.url);
-  if (state.config.webhook) await sendDiscord(title, t.name, body, t.url);
+  const hook = t.webhook || state.config.webhook;
+  if (hook) await sendDiscord(hook, title, t.name, body, t.url);
   if (win && !win.isFocused()) win.flashFrame(true);
 }
 
-async function sendDiscord(title, name, body, url) {
+function stopAlarm() {
+  clearTimeout(ringTimer);
+  state.ringing = null;
+}
+
+async function sendDiscord(hook, title, name, body, url) {
   try {
-    const res = await fetch(state.config.webhook, {
+    const res = await fetch(hook, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -212,13 +235,17 @@ ipcMain.handle('saveConfig', (_e, c) => {
   return snapshot();
 });
 ipcMain.handle('addTarget', (_e, t) => {
-  state.targets.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: t.name, url: t.url, mode: t.mode, keyword: t.keyword || '', enabled: true, status: 'Wartet', live: false, lastCheck: 0, lastError: '' });
+  state.targets.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: t.name, url: t.url, mode: t.mode, keyword: t.keyword || '', webhook: t.webhook || '', enabled: true, status: 'Wartet', live: false, lastCheck: 0, lastError: '' });
   save(); log('info', `Ziel hinzugefügt: ${t.name}`);
   return snapshot();
 });
 ipcMain.handle('updateTarget', (_e, id, p) => {
   const t = state.targets.find(x => x.id === id);
-  if (t) { Object.assign(t, p); if (p.enabled === false) t.live = false; save(); }
+  if (t) {
+    if ('enabled' in p) { t.enabled = !!p.enabled; if (!t.enabled) t.live = false; }
+    if ('webhook' in p) t.webhook = String(p.webhook || '');
+    save();
+  }
   return snapshot();
 });
 ipcMain.handle('removeTarget', (_e, id) => {
@@ -229,10 +256,11 @@ ipcMain.handle('start', () => { start(); return snapshot(); });
 ipcMain.handle('stop', () => { stop(); return snapshot(); });
 ipcMain.handle('clearLog', () => { state.log = []; return snapshot(); });
 ipcMain.handle('testAlert', async () => {
-  await alarm({ name: 'Test', url: 'https://github.com/Djlover007' }, 'Test-Alarm', 'Wenn du das siehst, funktionieren die Benachrichtigungen.');
-  state.stats.alerts--;
+  await alarm({ id: 'test', name: 'Test', url: 'https://github.com/Djlover007' }, 'Test-Alarm', 'Wenn du das siehst, funktionieren die Benachrichtigungen.', { test: true });
   return snapshot();
 });
+ipcMain.handle('stopAlarm', () => { stopAlarm(); return snapshot(); });
+ipcMain.handle('clearStats', () => { state.events = []; save(); return snapshot(); });
 ipcMain.handle('checkUpdate', () => { checkUpdate(); return snapshot(); });
 ipcMain.handle('installUpdate', () => { installUpdate(); return snapshot(); });
 ipcMain.handle('openUrl', (_e, u) => { if (/^https?:\/\//.test(u)) shell.openExternal(u); return snapshot(); });
@@ -243,7 +271,7 @@ function createWindow() {
     width: 1200, height: 800, minWidth: 820, minHeight: 600,
     backgroundColor: '#0f1115', title: 'Fox Queue',
     icon: path.join(__dirname, '..', 'ui', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' },
   });
   Menu.setApplicationMenu(null);
   win.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
@@ -253,4 +281,4 @@ function createWindow() {
 
 app.setAppUserModelId('de.djlover007.foxqueue');
 app.whenReady().then(() => { load(); createWindow(); setTimeout(setupUpdater, 4000); });
-app.on('window-all-closed', () => { stop(); app.quit(); });
+app.on('window-all-closed', () => { stop(); stopAlarm(); app.quit(); });

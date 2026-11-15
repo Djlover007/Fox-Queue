@@ -120,6 +120,35 @@ h2 { font-size: 13px; letter-spacing: .8px; text-transform: uppercase; }
 .badge.err { background: rgba(239,90,90,.12); border-color: var(--red); color: var(--red); }
 .target-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* Alarm-Leiste */
+.alarm-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: rgba(239,90,90,.16); border: 2px solid var(--red); border-radius: 10px;
+  padding: 12px 14px; margin: -8px 0 18px; animation: blink 1s infinite;
+  position: sticky; top: 0; z-index: 20; backdrop-filter: blur(6px); background-color: rgba(40,18,20,.92);
+}
+.alarm-text { display: flex; flex-direction: column; gap: 2px; }
+.alarm-text strong { color: var(--red); letter-spacing: 1px; }
+@keyframes blink { 50% { background-color: rgba(90,28,30,.96); } }
+
+/* Statistik */
+.stats-filter { margin-bottom: 14px; }
+.stats-filter select { width: auto; min-width: 200px; flex: 1; max-width: 360px; }
+.tiles.tiles4 { grid-template-columns: repeat(4, 1fr); }
+.tile-value.small-val { font-size: 18px; margin: 12px 0 6px; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 170px; padding-top: 6px; }
+.bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
+.bar-fill { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; opacity: .85; }
+.bar.top .bar-fill { opacity: 1; box-shadow: 0 0 0 1px var(--accent); }
+.bar-n { font-size: 11px; color: var(--muted); height: 14px; }
+.bar-l { font-size: 11px; color: var(--muted); }
+.bars.hours { gap: 2px; }
+.bars.hours .bar-l { font-size: 9px; }
+.target details { font-size: 13px; }
+.target summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.target details .row { margin-top: 8px; }
+.target details input { flex: 1; min-width: 180px; }
+
 /* Update-Leiste */
 .update-bar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -143,6 +172,9 @@ h2 { font-size: 13px; letter-spacing: .8px; text-transform: uppercase; }
   .main { order: 1; padding: 12px 12px 24px; }
   .tiles { grid-template-columns: repeat(2, 1fr); }
   .tiles .tile:last-child { grid-column: span 2; }
+  .tiles.tiles4 { grid-template-columns: repeat(2, 1fr); }
+  .tiles.tiles4 .tile:last-child { grid-column: auto; }
+  .nav-item { padding: 10px 4px; font-size: 13px; }
   .grid2 { grid-template-columns: 1fr; }
   .kv { grid-template-columns: 110px 1fr; }
   .desktop-only { display: none !important; }

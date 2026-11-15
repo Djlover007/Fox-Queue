@@ -23,22 +23,30 @@ const bridge = (() => {
       testAlert: () => call('testAlert'),
       checkUpdate: () => call('checkUpdate'),
       installUpdate: () => call('installUpdate'),
+      stopAlarm: () => call('stopAlarm'),
+      clearStats: () => call('clearStats'),
       openUrl: (u) => call('openUrl', u),
     };
   }
   // Fallback für Vorschau im Browser
-  let s = { running: false, platform: 'web', version: 'Vorschau', update: { status: 'available', latest: '1.0.9', progress: 0, message: '' }, config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false }, targets: [], stats: { alerts: 0, errors: 0, checks: 0 }, log: [] };
+  const demoEvents = Array.from({ length: 40 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - i * 3); d.setHours([10, 10, 17, 9, 10, 18][i % 6], (i * 7) % 60);
+    return { t: d.getTime(), targetId: i % 3 ? 'a' : 'b', name: i % 3 ? 'Pokémon Drop' : 'Fall Out Boy', mode: 'queue' };
+  });
+  let s = { running: false, platform: 'web', version: 'Vorschau', ringing: null, events: demoEvents, update: { status: 'idle', latest: '', progress: 0, message: '' }, config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true }, targets: [], stats: { alerts: 0, errors: 0, checks: 0 }, log: [] };
   const ok = () => Promise.resolve(s);
   return {
     getState: ok,
     saveConfig: (c) => { s.config = { ...s.config, ...c }; return ok(); },
-    addTarget: (t) => { s.targets.push({ ...t, id: Date.now().toString(36), enabled: true, status: 'Wartet' }); return ok(); },
+    addTarget: (t) => { s.targets.push({ ...t, id: s.targets.length ? Date.now().toString(36) : 'a', enabled: true, status: 'Wartet' }); return ok(); },
     updateTarget: (id, p) => { s.targets = s.targets.map(t => t.id === id ? { ...t, ...p } : t); return ok(); },
     removeTarget: (id) => { s.targets = s.targets.filter(t => t.id !== id); return ok(); },
     start: () => { s.running = true; return ok(); },
     stop: () => { s.running = false; return ok(); },
     clearLog: () => { s.log = []; return ok(); },
-    testAlert: () => ok(),
+    testAlert: () => { s.ringing = { name: 'Test', url: 'https://github.com/Djlover007', title: 'Test-Alarm', t: Date.now() }; return ok(); },
+    stopAlarm: () => { s.ringing = null; return ok(); },
+    clearStats: () => { s.events = []; return ok(); },
     checkUpdate: () => ok(),
     installUpdate: () => ok(),
     openUrl: (u) => { window.open(u, '_blank'); return ok(); },
@@ -53,6 +61,33 @@ const MODE_LABEL = { queue: 'Queue-it', keyword: 'Text erscheint', gone: 'Text v
 
 let state = null;
 let settingsDirty = false;
+const openHooks = new Set();   // aufgeklappte „Discord-Kanal“-Bereiche
+let lastListHtml = '', lastFeedHtml = '', lastStatsKey = '';
+const isHook = (u) => /^https:\/\/(canary\.|ptb\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(u);
+
+// ---- Ton-Alarm (Windows/Browser; Android spielt den Ton nativ) ----
+const siren = {
+  ctx: null, osc: null, lfo: null, gain: null,
+  start() {
+    if (this.osc) return;
+    try {
+      this.ctx = this.ctx || new (window.AudioContext || window.webkitAudioContext)();
+      this.ctx.resume();
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain(), l = this.ctx.createOscillator(), lg = this.ctx.createGain();
+      o.type = 'square'; o.frequency.value = 880;
+      l.type = 'square'; l.frequency.value = 2.5; lg.gain.value = 220;   // wechselt zwischen zwei Tönen
+      l.connect(lg); lg.connect(o.frequency);
+      g.gain.value = 0.18;
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(); l.start();
+      this.osc = o; this.lfo = l; this.gain = g;
+    } catch (e) { console.warn('Ton-Alarm nicht möglich', e); }
+  },
+  stop() {
+    try { this.osc && this.osc.stop(); this.lfo && this.lfo.stop(); } catch {}
+    this.osc = this.lfo = this.gain = null;
+  },
+};
 
 // ---- Navigation ----
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -60,6 +95,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + btn.dataset.page));
     if (btn.dataset.page === 'settings') fillSettings();
+    document.querySelector('.main').scrollTop = 0; window.scrollTo(0, 0);
   });
 });
 
@@ -93,10 +129,9 @@ function render() {
   $('tInterval').textContent = `alle ${config.intervalSec} s`;
 
   // Feed
-  const feed = $('feed');
-  if (!log.length) feed.innerHTML = '<div class="empty">Noch keine Einträge.</div>';
-  else feed.innerHTML = log.slice(0, 150).map(e =>
-    `<div class="feed-item ${esc(e.type)}"><span class="time">${fmtTime(e.t)}</span><span>${esc(e.msg)}</span></div>`).join('');
+  const feedHtml = !log.length ? '<div class="empty">Noch keine Einträge.</div>'
+    : log.slice(0, 150).map(e => `<div class="feed-item ${esc(e.type)}"><span class="time">${fmtTime(e.t)}</span><span>${esc(e.msg)}</span></div>`).join('');
+  if (feedHtml !== lastFeedHtml) { $('feed').innerHTML = feedHtml; lastFeedHtml = feedHtml; }
 
   // Setup
   const host = (u) => { try { return new URL(u).host; } catch { return u; } };
@@ -105,16 +140,19 @@ function render() {
     ['Seiten', targets.length ? [...new Set(targets.map(t => esc(host(t.url))))].join(', ') : '–'],
     ['Intervall', `${config.intervalSec} s`],
     ['Benachrichtigung', config.notify ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus'],
-    ['Discord-Webhook', config.webhook ? '<span class="dot ok"></span>gesetzt' : '<span class="dot"></span>nicht gesetzt'],
+    ['Ton-Alarm', config.sound ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus'],
+    ['Discord-Webhook', (config.webhook ? '<span class="dot ok"></span>gesetzt' : '<span class="dot"></span>nicht gesetzt')
+      + (targets.some(t => t.webhook) ? ` · ${targets.filter(t => t.webhook).length} Ziel(e) mit eigenem Kanal` : '')],
     ['Auto-Öffnen', state.platform === 'android' ? 'per Antippen der Meldung' : (config.openBrowser ? 'an' : 'aus')],
   ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join('');
 
   renderUpdate();
+  renderAlarm();
+  renderStats();
 
   // Ziele
   const list = $('targetList');
-  if (!targets.length) { list.innerHTML = '<div class="card empty">Noch keine Ziele. Füge oben eins hinzu.</div>'; return; }
-  list.innerHTML = targets.map(t => {
+  const listHtml = !targets.length ? '<div class="card empty">Noch keine Ziele. Füge oben eins hinzu.</div>' : targets.map(t => {
     const badge = t.lastError ? `<span class="badge err">Fehler</span>`
       : t.live ? `<span class="badge live">LIVE</span>`
       : `<span class="badge">${esc(t.status || 'Wartet')}</span>`;
@@ -126,8 +164,74 @@ function render() {
         <button class="btn small" data-act="toggle" data-id="${t.id}">${t.enabled ? 'Pausieren' : 'Aktivieren'}</button>
         <button class="btn small" data-act="open" data-id="${t.id}">Öffnen</button>
         <button class="btn small" data-act="del" data-id="${t.id}">Löschen</button>
-      </div></div>`;
+      </div>
+      <details data-id="${t.id}" ${openHooks.has(t.id) ? 'open' : ''}>
+        <summary>Discord-Kanal: ${t.webhook ? 'eigener Webhook' : 'Standard aus Einstellungen'}</summary>
+        <div class="row">
+          <input data-hook="${t.id}" value="${esc(t.webhook || '')}" placeholder="leer = Standard-Webhook" />
+          <button class="btn small primary" data-act="hook" data-id="${t.id}">Speichern</button>
+        </div>
+      </details></div>`;
   }).join('');
+  // Nicht neu zeichnen, während du tippst – und nur, wenn sich etwas geändert hat
+  if (listHtml !== lastListHtml && !list.contains(document.activeElement)) { list.innerHTML = listHtml; lastListHtml = listHtml; }
+}
+
+function renderAlarm() {
+  const r = state.ringing;
+  $('alarmBar').classList.toggle('hidden', !r);
+  if (r) $('alarmText').textContent = `${r.title || 'Alarm'}: ${r.name}`;
+  if (r && state.config.sound && state.platform !== 'android') siren.start(); else siren.stop();
+}
+
+const DAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const DAYS_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+
+function bars(counts, labels, highlight) {
+  const max = Math.max(1, ...counts);
+  return counts.map((n, i) => `<div class="bar ${highlight === i && n ? 'top' : ''}" title="${labels[i]}: ${n}">
+      <span class="bar-n">${n || ''}</span><div class="bar-fill" style="height:${Math.round(n / max * 100)}%"></div><span class="bar-l">${labels[i]}</span></div>`).join('');
+}
+
+function renderStats() {
+  const all = state.events || [];
+  // Auswahl der Ziele (auch gelöschte Ziele aus der Statistik)
+  const sel = $('statTarget');
+  const names = new Map();
+  all.forEach(e => names.set(e.targetId, e.name));
+  state.targets.forEach(t => names.set(t.id, t.name));
+  const optKey = [...names].map(([id, n]) => id + n).join('|');
+  if (sel.dataset.key !== optKey) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Alle Ziele</option>' + [...names].map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('');
+    sel.value = names.has(cur) ? cur : '';
+    sel.dataset.key = optKey;
+  }
+  const ev = (sel.value ? all.filter(e => e.targetId === sel.value) : all).slice().sort((x, y) => x.t - y.t);
+  const key = sel.value + '|' + ev.length + '|' + (ev.length ? ev[ev.length - 1].t : 0);
+  if (key === lastStatsKey) return;
+  lastStatsKey = key;
+
+  const days = Array(7).fill(0), hours = Array(24).fill(0);
+  ev.forEach(e => { const d = new Date(e.t); days[(d.getDay() + 6) % 7]++; hours[d.getHours()]++; });
+  const topDay = ev.length ? days.indexOf(Math.max(...days)) : -1;
+  const topHour = ev.length ? hours.indexOf(Math.max(...hours)) : -1;
+
+  $('stTotal').textContent = ev.length;
+  $('stSpan').textContent = ev.length ? `seit ${new Date(ev[0].t).toLocaleDateString('de-DE')}` : 'noch keine Daten';
+  $('stDay').textContent = topDay >= 0 ? DAYS_LONG[topDay] : '–';
+  $('stDayFoot').textContent = topDay >= 0 ? `${days[topDay]} von ${ev.length} Drops` : 'braucht ein paar Drops';
+  $('stHour').textContent = topHour >= 0 ? `${String(topHour).padStart(2, '0')}–${String((topHour + 1) % 24).padStart(2, '0')} Uhr` : '–';
+  $('stHourFoot').textContent = topHour >= 0 ? `${hours[topHour]} von ${ev.length} Drops` : 'braucht ein paar Drops';
+  const last = ev[ev.length - 1];
+  $('stLast').textContent = last ? new Date(last.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–';
+  $('stLastFoot').textContent = last ? last.name : '–';
+
+  $('dayBars').innerHTML = bars(days, DAYS, topDay);
+  $('hourBars').innerHTML = bars(hours, hours.map((_, h) => (h % 3 === 0 ? String(h) : '')), topHour);
+  $('eventList').innerHTML = ev.length
+    ? ev.slice(-50).reverse().map(e => `<div class="feed-item alert"><span class="time">${new Date(e.t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}<br>${fmtTime(e.t).slice(0, 5)}</span><span>${esc(e.name)}<br><span class="muted">${MODE_LABEL[e.mode] || ''} · ${DAYS_LONG[(new Date(e.t).getDay() + 6) % 7]}</span></span></div>`).join('')
+    : '<div class="empty">Sobald Fox Queue einen Drop meldet, taucht er hier auf.</div>';
 }
 
 const UPDATE_STATUS = {
@@ -164,6 +268,7 @@ function fillSettings() {
   $('sWebhook').value = state.config.webhook || '';
   $('sNotify').checked = !!state.config.notify;
   $('sOpen').checked = !!state.config.openBrowser;
+  $('sSound').checked = state.config.sound !== false;
   settingsDirty = false;
 }
 
@@ -195,12 +300,14 @@ $('addTarget').addEventListener('click', async () => {
   let url = $('fUrl').value.trim();
   const mode = $('fMode').value;
   const keyword = $('fKeyword').value.trim();
+  const webhook = $('fWebhook').value.trim();
   if (!url) return alert('Bitte eine URL eingeben.');
+  if (webhook && !isHook(webhook)) return alert('Das ist keine gültige Discord-Webhook-URL.');
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try { new URL(url); } catch { return alert('Die URL sieht ungültig aus.'); }
   if ((mode === 'keyword' || mode === 'gone') && !keyword) return alert('Bitte den Text eingeben, auf den geachtet werden soll.');
-  state = await bridge.addTarget({ name: name || new URL(url).host, url, mode, keyword: (mode === 'keyword' || mode === 'gone') ? keyword : '' });
-  $('fName').value = ''; $('fUrl').value = ''; $('fKeyword').value = '';
+  state = await bridge.addTarget({ name: name || new URL(url).host, url, mode, keyword: (mode === 'keyword' || mode === 'gone') ? keyword : '', webhook });
+  $('fName').value = ''; $('fUrl').value = ''; $('fKeyword').value = ''; $('fWebhook').value = '';
   render();
 });
 
@@ -212,18 +319,45 @@ $('targetList').addEventListener('click', async (e) => {
   if (b.dataset.act === 'toggle') state = await bridge.updateTarget(t.id, { enabled: !t.enabled });
   if (b.dataset.act === 'open') await bridge.openUrl(t.url);
   if (b.dataset.act === 'del' && confirm(`„${t.name}“ löschen?`)) state = await bridge.removeTarget(t.id);
+  if (b.dataset.act === 'hook') {
+    const val = document.querySelector(`input[data-hook="${t.id}"]`).value.trim();
+    if (val && !isHook(val)) return alert('Das ist keine gültige Discord-Webhook-URL.');
+    b.blur();
+    state = await bridge.updateTarget(t.id, { webhook: val });
+    openHooks.delete(t.id);
+    lastListHtml = '';
+  }
   render();
 });
 
-['sInterval', 'sWebhook', 'sNotify', 'sOpen'].forEach(id => $(id).addEventListener('input', () => { settingsDirty = true; }));
+$('targetList').addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (d.tagName !== 'DETAILS') return;
+  if (d.open) openHooks.add(d.dataset.id); else openHooks.delete(d.dataset.id);
+}, true);
+
+$('alarmStop').addEventListener('click', async () => { siren.stop(); state = await bridge.stopAlarm(); render(); });
+$('alarmOpen').addEventListener('click', async () => {
+  const u = state.ringing && state.ringing.url;
+  siren.stop(); state = await bridge.stopAlarm();
+  if (u) await bridge.openUrl(u);
+  render();
+});
+$('statTarget').addEventListener('change', () => { lastStatsKey = ''; renderStats(); });
+$('clearStats').addEventListener('click', async () => {
+  if (!confirm('Die ganze Drop-Statistik löschen?')) return;
+  state = await bridge.clearStats(); lastStatsKey = ''; render();
+});
+
+['sInterval', 'sWebhook', 'sNotify', 'sOpen', 'sSound'].forEach(id => $(id).addEventListener('input', () => { settingsDirty = true; }));
 
 $('saveSettings').addEventListener('click', async () => {
   const intervalSec = Math.max(20, parseInt($('sInterval').value, 10) || 60);
   const webhook = $('sWebhook').value.trim();
-  if (webhook && !/^https:\/\/(canary\.|ptb\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)) {
+  if (webhook && !isHook(webhook)) {
     return alert('Das ist keine gültige Discord-Webhook-URL.');
   }
-  state = await bridge.saveConfig({ intervalSec, webhook, notify: $('sNotify').checked, openBrowser: $('sOpen').checked });
+  state = await bridge.saveConfig({ intervalSec, webhook, notify: $('sNotify').checked, openBrowser: $('sOpen').checked, sound: $('sSound').checked });
   fillSettings(); render();
 });
 

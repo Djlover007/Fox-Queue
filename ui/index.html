@@ -18,6 +18,7 @@
     <nav class="nav">
       <button class="nav-item active" data-page="dashboard">Dashboard</button>
       <button class="nav-item" data-page="targets">Ziele <span class="nav-count" id="navTargetCount">0</span></button>
+      <button class="nav-item" data-page="stats">Statistik</button>
       <button class="nav-item" data-page="settings">Einstellungen</button>
     </nav>
     <div class="side-status">
@@ -36,6 +37,14 @@
       </div>
       <button class="btn primary" id="toggleBtn">Start</button>
     </header>
+
+    <div class="alarm-bar hidden" id="alarmBar">
+      <div class="alarm-text"><strong>🔔 ALARM</strong><span id="alarmText"></span></div>
+      <div class="row">
+        <button class="btn" id="alarmOpen">Seite öffnen</button>
+        <button class="btn primary" id="alarmStop">Alarm aus</button>
+      </div>
+    </div>
 
     <div class="update-bar hidden" id="updateBar">
       <span id="updateText">Update verfügbar</span>
@@ -88,11 +97,46 @@
             </select>
           </label>
           <label id="fKeywordWrap" class="hidden">Text<input id="fKeyword" placeholder="In den Warenkorb" /></label>
+          <label>Eigener Discord-Webhook (optional, sonst der aus den Einstellungen)<input id="fWebhook" placeholder="https://discord.com/api/webhooks/..." /></label>
           <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
         </div>
       </div>
 
       <div class="target-list" id="targetList"></div>
+    </section>
+
+    <!-- STATISTIK -->
+    <section class="page" id="page-stats">
+      <h1>Statistik</h1>
+      <p class="sub">Wann Queues und Drops live gegangen sind – damit du weißt, wann du bereit sein solltest.</p>
+
+      <div class="row stats-filter">
+        <select id="statTarget"><option value="">Alle Ziele</option></select>
+        <button class="btn" id="clearStats">Statistik löschen</button>
+      </div>
+
+      <div class="tiles tiles4">
+        <div class="tile"><div class="tile-label">Drops gesamt</div><div class="tile-value accent" id="stTotal">0</div><div class="tile-foot" id="stSpan">–</div></div>
+        <div class="tile"><div class="tile-label">Häufigster Tag</div><div class="tile-value" id="stDay">–</div><div class="tile-foot" id="stDayFoot">–</div></div>
+        <div class="tile"><div class="tile-label">Häufigste Uhrzeit</div><div class="tile-value" id="stHour">–</div><div class="tile-foot" id="stHourFoot">–</div></div>
+        <div class="tile"><div class="tile-label">Letzter Drop</div><div class="tile-value small-val" id="stLast">–</div><div class="tile-foot" id="stLastFoot">–</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Nach Wochentag</h2></div>
+          <div class="bars" id="dayBars"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Nach Uhrzeit</h2></div>
+          <div class="bars hours" id="hourBars"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Letzte Drops</h2></div>
+        <div class="feed" id="eventList"></div>
+      </div>
     </section>
 
     <!-- EINSTELLUNGEN -->
@@ -104,6 +148,7 @@
           <label>Prüfintervall (Sekunden, mind. 20)<input id="sInterval" type="number" min="20" step="5" /></label>
           <label>Discord-Webhook (optional)<input id="sWebhook" placeholder="https://discord.com/api/webhooks/..." /></label>
           <label class="check"><input type="checkbox" id="sNotify" /> Benachrichtigung auf dem Gerät</label>
+          <label class="check"><input type="checkbox" id="sSound" /> Lauter Ton-Alarm, bis du reagierst (max. 2 Min.)</label>
           <label class="check desktop-only"><input type="checkbox" id="sOpen" /> Seite bei Alarm automatisch im Browser öffnen</label>
           <div class="row">
             <button class="btn primary" id="saveSettings">Speichern</button>

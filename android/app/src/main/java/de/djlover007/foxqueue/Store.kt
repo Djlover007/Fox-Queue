@@ -6,6 +6,13 @@ import android.app.PendingIntent
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,6 +28,7 @@ object Store {
 
     data class Target(
         val id: String, var name: String, var url: String, var mode: String, var keyword: String, var enabled: Boolean,
+        var webhook: String = "",
         var status: String = "Wartet", var live: Boolean = false, var lastCheck: Long = 0, var lastError: String = "", var hash: String? = null,
     )
 
@@ -28,6 +36,12 @@ object Store {
     var intervalSec = 60
     var webhook = ""
     var notify = true
+    var sound = true
+    private val events = ArrayList<JSONObject>()  // Drop-Statistik
+    @Volatile var ringing: JSONObject? = null
+    private var player: MediaPlayer? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val autoStop = Runnable { stopAlarm() }
     val targets = mutableListOf<Target>()
     var alerts = 0; var errors = 0; var checks = 0
     private val log = ArrayList<JSONObject>()
@@ -45,21 +59,24 @@ object Store {
         intervalSec = p.getInt("interval", 60)
         webhook = p.getString("webhook", "") ?: ""
         notify = p.getBoolean("notify", true)
+        sound = p.getBoolean("sound", true)
+        val ev = JSONArray(p.getString("events", "[]"))
+        for (i in 0 until ev.length()) events.add(ev.getJSONObject(i))
         val arr = JSONArray(p.getString("targets", "[]"))
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
-            targets.add(Target(o.getString("id"), o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), o.optBoolean("enabled", true)))
+            targets.add(Target(o.getString("id"), o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), o.optBoolean("enabled", true), o.optString("webhook")))
         }
     }
 
     @Synchronized fun save(ctx: Context) {
         val arr = JSONArray()
         targets.forEach {
-            arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled))
+            arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook))
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
-            .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify)
-            .putString("targets", arr.toString()).apply()
+            .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound)
+            .putString("targets", arr.toString()).putString("events", JSONArray(events).toString()).apply()
     }
 
     @Synchronized fun log(type: String, msg: String) {
@@ -69,15 +86,19 @@ object Store {
 
     @Synchronized fun clearLog() = log.clear()
 
+    @Synchronized fun clearStats(ctx: Context) { events.clear(); save(ctx) }
+
     @Synchronized fun stateJson(): String {
         val ts = JSONArray()
         targets.forEach {
             ts.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword)
-                .put("enabled", it.enabled).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
+                .put("enabled", it.enabled).put("webhook", it.webhook).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
         }
         return JSONObject()
             .put("running", running).put("platform", "android")
-            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", false))
+            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", false).put("sound", sound))
+            .put("events", JSONArray(events))
+            .put("ringing", ringing ?: JSONObject.NULL)
             .put("targets", ts)
             .put("stats", JSONObject().put("alerts", alerts).put("errors", errors).put("checks", checks))
             .put("log", JSONArray(log))
@@ -197,10 +218,26 @@ object Store {
 
     // ---------- Alarm ----------
     fun alarm(ctx: Context, t: Target, title: String, body: String, count: Boolean = true) {
-        synchronized(this) { if (count) alerts++; log("alert", "🦊 $title: ${t.name}") }
-        if (notify) {
+        synchronized(this) {
+            if (count) {
+                alerts++
+                events.add(JSONObject().put("t", System.currentTimeMillis()).put("targetId", t.id).put("name", t.name).put("mode", t.mode))
+                while (events.size > 1000) events.removeAt(0)
+                save(ctx)
+            }
+            log("alert", "🦊 $title: ${t.name}")
+        }
+        if (sound) startAlarm(ctx, t, title)
+        if (notify || sound) {
+            // Antippen: App öffnet die Seite und stoppt den Alarm
             val open = PendingIntent.getActivity(
-                ctx, alertId, Intent(Intent.ACTION_VIEW, Uri.parse(t.url)),
+                ctx, alertId,
+                Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_OPEN_ALERT).putExtra("url", t.url)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val silence = PendingIntent.getBroadcast(
+                ctx, 5, Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_STOP_ALARM),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val n = Notification.Builder(ctx, CH_ALERT)
@@ -209,21 +246,67 @@ object Store {
                 .setContentText("${t.name} – antippen zum Öffnen")
                 .setStyle(Notification.BigTextStyle().bigText("${t.name}\n$body\n${t.url}"))
                 .setContentIntent(open)
+                .setDeleteIntent(silence)
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_ALARM)
+                .apply {
+                    if (sound) addAction(Notification.Action.Builder(
+                        android.graphics.drawable.Icon.createWithResource(ctx, R.drawable.ic_stat_fox), "Alarm aus", silence).build())
+                }
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(alertId++, n)
         }
-        if (webhook.isNotBlank()) sendDiscord(title, t.name, body, t.url)
+        val hook = t.webhook.ifBlank { webhook }
+        if (hook.isNotBlank()) sendDiscord(hook, title, t.name, body, t.url)
     }
 
-    private fun sendDiscord(title: String, name: String, body: String, url: String) {
+    // ---------- Ton-Alarm (Wecker-Kanal: klingelt auch im Lautlos-Modus) ----------
+    private fun startAlarm(ctx: Context, t: Target, title: String) {
+        ringing = JSONObject().put("name", t.name).put("url", t.url).put("title", title).put("t", System.currentTimeMillis())
+        main.post {
+            try {
+                player?.release()
+                val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                player = MediaPlayer().apply {
+                    setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                    setDataSource(ctx, uri)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+            } catch (e: Exception) {
+                log("error", "Alarmton: ${e.message}")
+            }
+            try {
+                val vib = ctx.getSystemService(Vibrator::class.java)
+                vib?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400, 600, 400, 1200), 0),
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
+            } catch (_: Exception) { }
+            main.removeCallbacks(autoStop)
+            main.postDelayed(autoStop, 120_000)  // spätestens nach 2 Minuten aus
+        }
+    }
+
+    fun stopAlarm() {
+        ringing = null
+        main.post {
+            main.removeCallbacks(autoStop)
+            try { player?.stop() } catch (_: Exception) { }
+            player?.release(); player = null
+            try { appCtx.getSystemService(Vibrator::class.java)?.cancel() } catch (_: Exception) { }
+        }
+    }
+
+    private fun sendDiscord(hook: String, title: String, name: String, body: String, url: String) {
         try {
             val payload = JSONObject()
                 .put("username", "Fox Queue")
                 .put("embeds", JSONArray().put(JSONObject()
                     .put("title", "🦊 $title").put("description", "**$name**\n$body").put("url", url).put("color", 0xE8893A)))
-            val c = (URL(webhook).openConnection() as HttpURLConnection).apply {
+            val c = (URL(hook).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; doOutput = true
                 connectTimeout = 10000; readTimeout = 10000
                 setRequestProperty("Content-Type", "application/json")

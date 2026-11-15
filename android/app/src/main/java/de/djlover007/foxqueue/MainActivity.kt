@@ -47,12 +47,24 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        intent?.let { if (it.action == Updater.ACTION_INSTALL_STATUS) Updater.handleInstallStatus(this, it) }
+        intent?.let { handleIntent(it) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.action == Updater.ACTION_INSTALL_STATUS) Updater.handleInstallStatus(this, intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        when (intent.action) {
+            Updater.ACTION_INSTALL_STATUS -> Updater.handleInstallStatus(this, intent)
+            ACTION_OPEN_ALERT -> {
+                Store.stopAlarm()
+                intent.getStringExtra("url")?.let { u ->
+                    if (u.startsWith("http")) try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u))) } catch (_: Exception) { }
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -76,6 +88,8 @@ class MainActivity : Activity() {
     }
 
     /** Wird von ui/app.js aufgerufen. Alle Methoden liefern den kompletten Zustand als JSON. */
+    companion object { const val ACTION_OPEN_ALERT = "de.djlover007.foxqueue.OPEN_ALERT" }
+
     inner class Bridge {
         private val ctx get() = this@MainActivity
 
@@ -87,6 +101,7 @@ class MainActivity : Activity() {
                 Store.intervalSec = maxOf(20, o.optInt("intervalSec", 60))
                 Store.webhook = o.optString("webhook", "")
                 Store.notify = o.optBoolean("notify", true)
+                Store.sound = o.optBoolean("sound", true)
             }
             Store.save(ctx); Store.log("info", "Einstellungen gespeichert.")
             return Store.stateJson()
@@ -96,7 +111,7 @@ class MainActivity : Activity() {
             val o = JSONObject(json)
             val id = java.lang.Long.toString(System.currentTimeMillis(), 36) + (1000..9999).random()
             synchronized(Store) {
-                Store.targets.add(Store.Target(id, o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), true))
+                Store.targets.add(Store.Target(id, o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), true, o.optString("webhook")))
             }
             Store.save(ctx); Store.log("info", "Ziel hinzugefügt: ${o.getString("name")}")
             return Store.stateJson()
@@ -107,6 +122,7 @@ class MainActivity : Activity() {
             synchronized(Store) {
                 Store.targets.find { it.id == id }?.let {
                     if (o.has("enabled")) { it.enabled = o.getBoolean("enabled"); if (!it.enabled) it.live = false }
+                    if (o.has("webhook")) it.webhook = o.optString("webhook")
                 }
             }
             Store.save(ctx)
@@ -141,6 +157,10 @@ class MainActivity : Activity() {
             }.start()
             return Store.stateJson()
         }
+
+        @JavascriptInterface fun stopAlarm(): String { Store.stopAlarm(); return Store.stateJson() }
+
+        @JavascriptInterface fun clearStats(): String { Store.clearStats(ctx); return Store.stateJson() }
 
         @JavascriptInterface fun checkUpdate(): String {
             Thread { Updater.check(ctx) }.start()

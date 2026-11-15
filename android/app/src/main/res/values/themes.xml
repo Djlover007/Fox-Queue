@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="FoxTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/fox_bg</item>
+        <item name="android:colorAccent">@color/fox_orange</item>
+        <item name="android:statusBarColor">@color/fox_bg</item>
+    </style>
+</resources>

@@ -1,0 +1,65 @@
+name: Build Fox Queue
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Android-APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: APK bauen
+        working-directory: android
+        run: gradle assembleRelease --no-daemon
+      - name: APK umbenennen
+        run: cp android/app/build/outputs/apk/release/app-release.apk FoxQueue.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoxQueue-Android
+          path: FoxQueue.apk
+
+  windows:
+    name: Windows-EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoxQueue-Windows
+          path: |
+            dist/*.exe
+
+  release:
+    name: Release veröffentlichen
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/FoxQueue-Android/*.apk
+            out/FoxQueue-Windows/*.exe

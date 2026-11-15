@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Fox Queue</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">🦊</div>
+      <div>
+        <div class="brand-name">FOX-QUEUE</div>
+        <div class="brand-version">Version 1.0.0</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-page="dashboard">Dashboard</button>
+      <button class="nav-item" data-page="targets">Ziele <span class="nav-count" id="navTargetCount">0</span></button>
+      <button class="nav-item" data-page="settings">Einstellungen</button>
+    </nav>
+    <div class="side-status">
+      <div><span class="dot" id="sideRunDot"></span><span id="sideRunText">Gestoppt</span></div>
+      <div><span class="dot" id="sideHookDot"></span><span id="sideHookText">Discord: aus</span></div>
+      <div><span class="dot ok"></span>Kein Bot, nur Alarm</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="dot" id="runDot"></span>
+        <strong id="runState">Gestoppt</strong>
+        <span class="muted" id="runHint">Es passiert nichts, bis du startest.</span>
+      </div>
+      <button class="btn primary" id="toggleBtn">Start</button>
+    </header>
+
+    <!-- DASHBOARD -->
+    <section class="page active" id="page-dashboard">
+      <h1>Dashboard</h1>
+      <p class="sub">Status aller überwachten Seiten auf einen Blick.</p>
+
+      <div class="tiles">
+        <div class="tile"><div class="tile-label">Ziele</div><div class="tile-value" id="tTargets">0</div><div class="tile-foot" id="tTargetsFoot">0 aktiv</div></div>
+        <div class="tile"><div class="tile-label">Queue offen</div><div class="tile-value accent" id="tOpen">0</div><div class="tile-foot">gerade live</div></div>
+        <div class="tile"><div class="tile-label">Alarme</div><div class="tile-value green" id="tAlerts">0</div><div class="tile-foot">seit Start</div></div>
+        <div class="tile"><div class="tile-label">Fehler</div><div class="tile-value red" id="tErrors">0</div><div class="tile-foot">Abrufe fehlgeschlagen</div></div>
+        <div class="tile"><div class="tile-label">Prüfungen</div><div class="tile-value" id="tChecks">0</div><div class="tile-foot" id="tInterval">alle 60 s</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Live-Feed</h2><button class="btn small" id="clearLog">Leeren</button></div>
+          <div class="feed" id="feed"><div class="empty">Noch keine Einträge.</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Setup</h2></div>
+          <div class="kv" id="setupKv"></div>
+          <p class="muted small-text">Alles wird unter <b>Ziele</b> und <b>Einstellungen</b> konfiguriert. Bei Alarm stellst du dich selbst im Browser an.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ZIELE -->
+    <section class="page" id="page-targets">
+      <h1>Ziele</h1>
+      <p class="sub">Seiten, die überwacht werden. Alarm gibt es, sobald sich der Zustand ändert.</p>
+
+      <div class="card">
+        <div class="card-head"><h2>Neues Ziel</h2></div>
+        <div class="form">
+          <label>Name<input id="fName" placeholder="z. B. Pokémon Drop" /></label>
+          <label>URL<input id="fUrl" placeholder="https://shop.example.de/produkt" inputmode="url" /></label>
+          <label>Modus
+            <select id="fMode">
+              <option value="queue">Queue-it erkennt (Warteschlange geht auf)</option>
+              <option value="keyword">Text erscheint (z. B. „In den Warenkorb“)</option>
+              <option value="gone">Text verschwindet (z. B. „Ausverkauft“)</option>
+              <option value="change">Seite ändert sich</option>
+            </select>
+          </label>
+          <label id="fKeywordWrap" class="hidden">Text<input id="fKeyword" placeholder="In den Warenkorb" /></label>
+          <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
+        </div>
+      </div>
+
+      <div class="target-list" id="targetList"></div>
+    </section>
+
+    <!-- EINSTELLUNGEN -->
+    <section class="page" id="page-settings">
+      <h1>Einstellungen</h1>
+      <p class="sub">Wie oft geprüft wird und wohin Alarme gehen.</p>
+      <div class="card">
+        <div class="form">
+          <label>Prüfintervall (Sekunden, mind. 20)<input id="sInterval" type="number" min="20" step="5" /></label>
+          <label>Discord-Webhook (optional)<input id="sWebhook" placeholder="https://discord.com/api/webhooks/..." /></label>
+          <label class="check"><input type="checkbox" id="sNotify" /> Benachrichtigung auf dem Gerät</label>
+          <label class="check desktop-only"><input type="checkbox" id="sOpen" /> Seite bei Alarm automatisch im Browser öffnen</label>
+          <div class="row">
+            <button class="btn primary" id="saveSettings">Speichern</button>
+            <button class="btn" id="testAlert">Test-Alarm senden</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>So funktioniert's</h2></div>
+        <p class="muted small-text">Fox Queue ruft deine Ziele ganz normal ab, wie ein Browser, der neu lädt. Keine Proxies, kein Captcha-Lösen, kein Vordrängeln. Sobald eine Warteschlange aufgeht oder ein Text erscheint, bekommst du Alarm und stellst dich mit deinem eigenen Browser an.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

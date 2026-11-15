@@ -93,7 +93,7 @@ class TaskActivity : Activity() {
                     return true
                 }
             }
-            if (savedInstanceState != null) restoreState(savedInstanceState) else loadUrl(url)
+            if (savedInstanceState != null) restoreState(savedInstanceState) else loadUrl(this@TaskActivity.url)
         }
         setContentView(web)
         handler.postDelayed(captchaCheck, 3000)

@@ -58,6 +58,13 @@ class MainActivity : Activity() {
     private fun handleIntent(intent: Intent) {
         when (intent.action) {
             Updater.ACTION_INSTALL_STATUS -> Updater.handleInstallStatus(this, intent)
+            ACTION_FOCUS_TASK -> {
+                // Captcha-Hinweis angetippt: genau dieses Fenster nach vorn holen
+                val id = intent.getIntExtra("taskId", -1)
+                getSystemService(android.app.ActivityManager::class.java).appTasks
+                    .firstOrNull { (if (Build.VERSION.SDK_INT >= 29) it.taskInfo.taskId else @Suppress("DEPRECATION") it.taskInfo.id) == id }
+                    ?.moveToFront()
+            }
             ACTION_AUTO_OPEN -> {
                 // Von der Vollbild-Benachrichtigung: Bildschirm an, ggf. Entsperren anfordern, Seite öffnen. Alarm läuft weiter.
                 if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
@@ -107,6 +114,7 @@ class MainActivity : Activity() {
     companion object {
         const val ACTION_OPEN_ALERT = "de.djlover007.foxqueue.OPEN_ALERT"
         const val ACTION_AUTO_OPEN = "de.djlover007.foxqueue.AUTO_OPEN"
+        const val ACTION_FOCUS_TASK = "de.djlover007.foxqueue.FOCUS_TASK"
     }
 
     override fun onPause() { Store.foreground = false; super.onPause() }

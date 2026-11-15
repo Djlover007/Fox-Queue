@@ -21,16 +21,47 @@ import android.webkit.WebViewClient
  */
 class TaskActivity : Activity() {
     private lateinit var web: WebView
+    private lateinit var name: String
+    private lateinit var url: String
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var detectJs = ""
+    private var captchaShown = false
+    private var lastCaptchaAlert = 0L
+    private var resumed = false
+
+    /** Schaut alle 2 Sekunden, ob ein Captcha zu sehen ist (löst nichts, meldet nur). */
+    private val captchaCheck = object : Runnable {
+        override fun run() {
+            if (::web.isInitialized && detectJs.isNotEmpty()) web.evaluateJavascript(detectJs) { res ->
+                val found = res == "true"
+                if (found && !captchaShown) {
+                    captchaShown = true
+                    // Nicht melden, wenn du das Fenster gerade vor dir hast; höchstens alle 60 s pro Fenster
+                    if (!resumed && System.currentTimeMillis() - lastCaptchaAlert > 60_000) {
+                        lastCaptchaAlert = System.currentTimeMillis()
+                        Store.captchaFound(this@TaskActivity, taskLabel(), url, taskId)
+                    }
+                } else if (!found && captchaShown) {
+                    captchaShown = false
+                    Store.captchaGone(this@TaskActivity, taskId)
+                }
+            }
+            handler.postDelayed(this, 2000)
+        }
+    }
+
+    private fun taskLabel(): String = intent.getIntExtra(EXTRA_NR, 0).let { if (it > 0) "$name #$it" else name }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Store.ensureLoaded(this)
+        detectJs = try { assets.open("captcha-detect.js").bufferedReader().use { it.readText() } } catch (_: Exception) { "" }
         window.statusBarColor = 0xFF0F1115.toInt()
         window.navigationBarColor = 0xFF161920.toInt()
 
-        val url = intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("http") }
-        if (url == null) { finishAndRemoveTask(); return }
-        val name = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { Uri.parse(url).host ?: "Seite" }
+        url = intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("http") } ?: run { finishAndRemoveTask(); return }
+        name = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { Uri.parse(url).host ?: "Seite" }
         val nr = intent.getIntExtra(EXTRA_NR, 0)
 
         // Name in der App-Übersicht, damit man die Fenster auseinanderhalten kann
@@ -65,7 +96,11 @@ class TaskActivity : Activity() {
             if (savedInstanceState != null) restoreState(savedInstanceState) else loadUrl(url)
         }
         setContentView(web)
+        handler.postDelayed(captchaCheck, 3000)
     }
+
+    override fun onResume() { super.onResume(); resumed = true; Store.captchaGone(this, taskId) }
+    override fun onPause() { resumed = false; super.onPause() }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
@@ -79,6 +114,8 @@ class TaskActivity : Activity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(captchaCheck)
+        Store.captchaGone(this, taskId)
         if (::web.isInitialized) { web.stopLoading(); web.destroy() }
         CookieManager.getInstance().flush()
         super.onDestroy()

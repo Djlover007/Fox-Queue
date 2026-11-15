@@ -281,6 +281,38 @@ ipcMain.handle('openUrl', (_e, u) => { if (/^https?:\/\//.test(u)) shell.openExt
 // ---- Zielseite in eigenen Fenstern (eigener Eintrag in der Taskleiste) ----
 const TASK_MAX = 20;
 const taskWins = new Set();
+// Captcha-Erkennung (gleiche Datei wie auf Android). Löst nichts, meldet nur.
+let CAPTCHA_JS = '';
+try { CAPTCHA_JS = fs.readFileSync(path.join(__dirname, '..', 'ui', 'captcha-detect.js'), 'utf8'); } catch { }
+
+function watchCaptcha(w, title, url) {
+  let shown = false, lastAlert = 0;
+  const timer = setInterval(async () => {
+    if (w.isDestroyed() || !CAPTCHA_JS) return;
+    let found = false;
+    try { found = await w.webContents.executeJavaScript(CAPTCHA_JS, true) === true; } catch { return; }
+    if (found && !shown) {
+      shown = true;
+      if (w.isFocused() || Date.now() - lastAlert < 60000) return; // du siehst es schon / nicht zu oft
+      lastAlert = Date.now();
+      log('alert', `🧩 Captcha wartet: ${title}`);
+      w.flashFrame(true);
+      if (Notification.isSupported()) {
+        const n = new Notification({ title: `🧩 Captcha: ${title}`, body: 'Klicken und selbst lösen', urgency: 'critical' });
+        n.on('click', () => { if (!w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } });
+        n.show();
+      }
+      const t = state.targets.find(x => x.url === url);
+      const hook = (t && t.webhook) || state.config.webhook;
+      if (hook) sendDiscord(hook, 'Captcha wartet', title, 'In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.', url);
+    } else if (!found && shown) {
+      shown = false;
+      w.flashFrame(false);
+    }
+  }, 2000);
+  w.on('focus', () => w.flashFrame(false));
+  w.on('closed', () => clearInterval(timer));
+}
 function openTaskWindows(url, name, count) {
   if (!/^https?:\/\//.test(url)) return;
   const n = Math.min(TASK_MAX, Math.max(1, parseInt(count, 10) || 1));
@@ -300,6 +332,7 @@ function openTaskWindows(url, name, count) {
     w.webContents.setWindowOpenHandler(({ url: u }) => { if (/^https?:\/\//.test(u)) w.loadURL(u); return { action: 'deny' }; });
     w.on('closed', () => taskWins.delete(w));
     taskWins.add(w);
+    watchCaptcha(w, title.replace(/^🦊 /, ''), url);
     w.loadURL(url);
   }
   if (n > 1) log('info', `${n} Fenster geöffnet: ${label}`);

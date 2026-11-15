@@ -31,6 +31,7 @@ import java.security.MessageDigest
 object Store {
     const val CH_ALERT = "fox_alert2"  // v2: ohne Kanal-Vibration, die steuert die App selbst
     const val CH_SERVICE = "fox_service"
+    const val CH_CAPTCHA = "fox_captcha"
     private const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36 FoxQueue/1.0"
 
     data class Target(
@@ -352,6 +353,37 @@ object Store {
         if (hook.isNotBlank()) sendDiscord(hook, title, t.name, body, t.url)
     }
 
+    /** Store bereit machen, falls ein Fenster nach einem Neustart des Prozesses zuerst aufgeht. */
+    fun ensureLoaded(ctx: Context) { if (!::appCtx.isInitialized) load(ctx) }
+
+    // ---------- Captcha-Hinweis aus einem eigenen Fenster ----------
+    /** Meldet ein Captcha: Benachrichtigung (antippen holt genau dieses Fenster nach vorn) + Discord. */
+    fun captchaFound(ctx: Context, name: String, url: String, taskId: Int) {
+        log("alert", "🧩 Captcha wartet: $name")
+        val focus = PendingIntent.getActivity(
+            ctx, 70_000 + taskId,
+            Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_FOCUS_TASK).putExtra("taskId", taskId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = Notification.Builder(ctx, CH_CAPTCHA)
+            .setSmallIcon(R.drawable.ic_stat_fox)
+            .setContentTitle("🧩 Captcha: $name")
+            .setContentText("Antippen und selbst lösen")
+            .setContentIntent(focus)
+            .setAutoCancel(true)
+            .setCategory(Notification.CATEGORY_REMINDER)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(80_000 + taskId, n)
+        val hook = synchronized(this) { targets.find { it.url == url }?.webhook }.orEmpty().ifBlank { webhook }
+        if (hook.isNotBlank()) Thread { sendDiscord(hook, "Captcha wartet", name, "In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.", url) }.start()
+    }
+
+    /** Hinweis entfernen, sobald das Captcha weg ist. */
+    fun captchaGone(ctx: Context, taskId: Int) {
+        ctx.getSystemService(NotificationManager::class.java).cancel(80_000 + taskId)
+    }
+
     // ---------- Ton-Alarm (Wecker-Kanal: klingelt auch im Lautlos-Modus) ----------
     private fun startAlarm(ctx: Context, t: Target, title: String) {
         ringing = JSONObject().put("name", t.name).put("url", t.url).put("title", title).put("t", System.currentTimeMillis())
@@ -418,6 +450,11 @@ object Store {
         nm.createNotificationChannel(NotificationChannel(CH_ALERT, "Alarme", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Wenn eine Warteschlange aufgeht oder ein Drop live ist"
             enableVibration(false)
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_CAPTCHA, "Captcha", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Wenn in einem Fox-Queue-Fenster ein Captcha auftaucht, das du lösen musst"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 300, 150, 300, 150, 300)
         })
         nm.createNotificationChannel(NotificationChannel(CH_SERVICE, "Monitor läuft", NotificationManager.IMPORTANCE_LOW).apply {
             description = "Dauerhafte Anzeige, solange überwacht wird"

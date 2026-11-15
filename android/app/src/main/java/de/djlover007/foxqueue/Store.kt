@@ -16,12 +16,14 @@ import android.os.Vibrator
 import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.Authenticator
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
-import java.net.PasswordAuthentication
 import java.net.Proxy
 import java.net.URI
+import java.util.concurrent.TimeUnit
+import okhttp3.Credentials
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.net.URL
 import java.security.MessageDigest
 
@@ -44,8 +46,7 @@ object Store {
     var sound = true
     var vibrate = true
     var proxy = ""   // optionaler einzelner Proxy: http://[nutzer:pass@]host:port
-    private var proxyObj: Proxy = Proxy.NO_PROXY
-    private var proxyAuth: String? = null
+    @Volatile private var client: OkHttpClient = OkHttpClient()
     private val events = ArrayList<JSONObject>()  // Drop-Statistik
     @Volatile var ringing: JSONObject? = null
     private var player: MediaPlayer? = null
@@ -126,29 +127,33 @@ object Store {
     // ---------- Proxy ----------
     @Synchronized fun applyProxy(value: String) {
         proxy = value.trim()
-        proxyObj = Proxy.NO_PROXY; proxyAuth = null
-        Authenticator.setDefault(null)
-        if (proxy.isEmpty()) return
-        try {
+        var p: Proxy = Proxy.NO_PROXY
+        var auth: String? = null
+        if (proxy.isNotEmpty()) try {
             val u = URI(proxy)
             val host = u.host ?: throw Exception("kein Host")
             val port = if (u.port > 0) u.port else 8080
-            proxyObj = Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(host, port))
+            p = Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(host, port))
             val info = u.rawUserInfo
             if (!info.isNullOrEmpty()) {
-                val user = Uri.decode(info.substringBefore(':'))
-                val pass = Uri.decode(info.substringAfter(':', ""))
-                proxyAuth = "Basic " + android.util.Base64.encodeToString("$user:$pass".toByteArray(), android.util.Base64.NO_WRAP)
-                // Für HTTPS-Seiten (CONNECT-Tunnel) fragt Android hier nach den Zugangsdaten
-                Authenticator.setDefault(object : Authenticator() {
-                    override fun getPasswordAuthentication(): PasswordAuthentication? =
-                        if (requestorType == Authenticator.RequestorType.PROXY) PasswordAuthentication(user, pass.toCharArray()) else null
-                })
+                auth = Credentials.basic(Uri.decode(info.substringBefore(':')), Uri.decode(info.substringAfter(':', "")))
             }
         } catch (e: Exception) {
-            proxyObj = Proxy.NO_PROXY; proxyAuth = null
+            p = Proxy.NO_PROXY; auth = null
             log("error", "Proxy ungültig: ${e.message}")
         }
+        val cred = auth
+        // OkHttp schickt die Proxy-Anmeldung gleich beim Verbindungsaufbau mit (auch für HTTPS/CONNECT)
+        client = OkHttpClient.Builder()
+            .proxy(p)
+            .proxyAuthenticator { _, response ->
+                if (cred == null || response.request.header("Proxy-Authorization") != null) null
+                else response.request.newBuilder().header("Proxy-Authorization", cred).build()
+            }
+            .followRedirects(true).followSslRedirects(true)
+            .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(40, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
     }
 
     // ---------- Abruf ----------
@@ -161,10 +166,17 @@ object Store {
         .replace("&nbsp;", " ").replace("&amp;", "&")
         .replace(Regex("\\s+"), " ").trim()
 
+    private fun netError(e: Exception): String = when (e) {
+        is java.net.UnknownHostException -> "Seite nicht gefunden (Adresse prüfen)"
+        is java.net.SocketTimeoutException -> "Zeitüberschreitung"
+        else -> e.message ?: e.javaClass.simpleName
+    }
+
     private fun proxyError(e: Exception): String {
         val m = e.message ?: e.javaClass.simpleName
         return when {
             m.contains("407") || m.contains("authenticat", true) -> "Proxy hat die Verbindung abgelehnt (Benutzer/Passwort prüfen)"
+            m.contains("end of stream", true) -> "Proxy hat die Verbindung ohne Antwort beendet (Typ/Port prüfen – nur HTTP-Proxys)"
             e is java.net.ConnectException || e is java.net.UnknownHostException -> "Proxy nicht erreichbar"
             e is java.net.SocketTimeoutException -> "Proxy antwortet nicht (Zeitüberschreitung)"
             else -> "Proxy-Fehler: $m"
@@ -174,45 +186,32 @@ object Store {
     private class Result(val live: Boolean, val status: String, val hash: String? = null)
 
     private fun fetch(t: Target): Result {
-        var url = t.url
-        var conn: HttpURLConnection? = null
-        // Weiterleitungen selbst folgen (auch http↔https), max. 8
-        for (i in 0 until 8) {
-            conn = (URL(url).openConnection(proxyObj) as HttpURLConnection).apply {
-                instanceFollowRedirects = false
-                proxyAuth?.let { setRequestProperty("Proxy-Authorization", it) }
-                connectTimeout = 15000; readTimeout = 20000
-                setRequestProperty("User-Agent", UA)
-                setRequestProperty("Accept-Language", "de-DE,de;q=0.9,en;q=0.8")
-                setRequestProperty("Cache-Control", "no-cache")
-            }
-            val code = try { conn.responseCode } catch (e: java.io.IOException) {
-                if (proxy.isNotEmpty()) throw Exception(proxyError(e))
-                throw e
-            }
+        val req = Request.Builder().url(t.url)
+            .header("User-Agent", UA)
+            .header("Accept-Language", "de-DE,de;q=0.9,en;q=0.8")
+            .header("Cache-Control", "no-cache")
+            .build()
+        val resp = try { client.newCall(req).execute() } catch (e: java.io.IOException) {
+            throw Exception(if (proxy.isNotEmpty()) proxyError(e) else netError(e))
+        }
+        val html: String
+        val finalUrl: String
+        try {
+            val code = resp.code
+            finalUrl = resp.request.url.toString()
             if (code == 407) throw Exception("Proxy hat die Verbindung abgelehnt (Benutzer/Passwort prüfen)")
-            if (code in 300..399) {
-                val loc = conn.getHeaderField("Location") ?: break
-                url = URL(URL(url), loc).toString()
-                conn.disconnect()
-                continue
+            val redirected = isQueueIt(finalUrl) && !isQueueIt(t.url)
+            if (code >= 400 && !redirected) {
+                val hint = if (code == 403 || code == 429) " – Seite blockiert automatische Abrufe, Intervall erhöhen" else ""
+                throw Exception("HTTP $code$hint")
             }
-            break
+            val bytes = resp.body?.bytes() ?: ByteArray(0)
+            html = String(bytes, 0, minOf(bytes.size, 3_000_000), Charsets.UTF_8)
+        } finally {
+            resp.close()
         }
-        val c = conn!!
-        val code = c.responseCode
+        val url = finalUrl
         val redirectedToQueue = isQueueIt(url) && !isQueueIt(t.url)
-        if (code >= 400 && !redirectedToQueue) {
-            c.disconnect()
-            val hint = if (code == 403 || code == 429) " – Seite blockiert automatische Abrufe, Intervall erhöhen" else ""
-            throw Exception("HTTP $code$hint")
-        }
-        val stream = if (code >= 400) c.errorStream else c.inputStream
-        val html = stream?.use { s ->
-            val bytes = s.readBytes()
-            String(bytes, 0, minOf(bytes.size, 3_000_000), Charsets.UTF_8)
-        } ?: ""
-        c.disconnect()
 
         val text = pageText(html)
         return when (t.mode) {

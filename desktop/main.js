@@ -2,7 +2,7 @@
 const { app, BrowserWindow, ipcMain, Notification, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { checkTarget } = require('./engine');
+const { checkTarget, setProxy } = require('./engine');
 
 // ---- Auto-Update ----
 const RELEASES_API = 'https://api.github.com/repos/Djlover007/Fox-Queue-Downloads/releases/latest';
@@ -83,7 +83,7 @@ const DATA_FILE = () => path.join(app.getPath('userData'), 'foxqueue.json');
 const state = {
   running: false,
   platform: 'windows',
-  config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true },
+  config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true, proxy: '' },
   targets: [],
   stats: { alerts: 0, errors: 0, checks: 0 },
   log: [],
@@ -101,6 +101,7 @@ function load() {
     state.config = { ...state.config, ...(d.config || {}) };
     state.targets = (d.targets || []).map(t => ({ webhook: '', ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
     state.events = Array.isArray(d.events) ? d.events : [];
+    try { setProxy(state.config.proxy); } catch (e) { log('error', `Proxy ungültig: ${e.message}`); }
   } catch { /* erster Start */ }
 }
 function save() {
@@ -231,7 +232,8 @@ const snapshot = () => JSON.parse(JSON.stringify({ ...state, version: app.getVer
 ipcMain.handle('getState', () => snapshot());
 ipcMain.handle('saveConfig', (_e, c) => {
   state.config = { ...state.config, ...c, intervalSec: Math.max(20, Number(c.intervalSec) || 60) };
-  save(); log('info', 'Einstellungen gespeichert.');
+  try { setProxy(state.config.proxy); } catch (e) { log('error', `Proxy ungültig: ${e.message}`); }
+  save(); log('info', state.config.proxy ? 'Einstellungen gespeichert – Abrufe laufen über den Proxy.' : 'Einstellungen gespeichert.');
   return snapshot();
 });
 ipcMain.handle('addTarget', (_e, t) => {

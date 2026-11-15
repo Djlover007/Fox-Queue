@@ -16,13 +16,18 @@ import android.os.Vibrator
 import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.Authenticator
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.PasswordAuthentication
+import java.net.Proxy
+import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
 
 /** Zentraler Zustand + Überwachungslogik. Keine Proxies, kein Captcha-Lösen – nur normale Abrufe. */
 object Store {
-    const val CH_ALERT = "fox_alert"
+    const val CH_ALERT = "fox_alert2"  // v2: ohne Kanal-Vibration, die steuert die App selbst
     const val CH_SERVICE = "fox_service"
     private const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36 FoxQueue/1.0"
 
@@ -37,6 +42,10 @@ object Store {
     var webhook = ""
     var notify = true
     var sound = true
+    var vibrate = true
+    var proxy = ""   // optionaler einzelner Proxy: http://[nutzer:pass@]host:port
+    private var proxyObj: Proxy = Proxy.NO_PROXY
+    private var proxyAuth: String? = null
     private val events = ArrayList<JSONObject>()  // Drop-Statistik
     @Volatile var ringing: JSONObject? = null
     private var player: MediaPlayer? = null
@@ -60,6 +69,8 @@ object Store {
         webhook = p.getString("webhook", "") ?: ""
         notify = p.getBoolean("notify", true)
         sound = p.getBoolean("sound", true)
+        vibrate = p.getBoolean("vibrate", true)
+        applyProxy(p.getString("proxy", "") ?: "")
         val ev = JSONArray(p.getString("events", "[]"))
         for (i in 0 until ev.length()) events.add(ev.getJSONObject(i))
         val arr = JSONArray(p.getString("targets", "[]"))
@@ -75,7 +86,7 @@ object Store {
             arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook))
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
-            .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound)
+            .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putString("proxy", proxy)
             .putString("targets", arr.toString()).putString("events", JSONArray(events).toString()).apply()
     }
 
@@ -96,7 +107,7 @@ object Store {
         }
         return JSONObject()
             .put("running", running).put("platform", "android")
-            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", false).put("sound", sound))
+            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", false).put("sound", sound).put("vibrate", vibrate).put("proxy", proxy))
             .put("events", JSONArray(events))
             .put("ringing", ringing ?: JSONObject.NULL)
             .put("targets", ts)
@@ -112,6 +123,34 @@ object Store {
         targets.forEach { it.live = false; it.hash = null; it.lastError = "" }
     }
 
+    // ---------- Proxy ----------
+    @Synchronized fun applyProxy(value: String) {
+        proxy = value.trim()
+        proxyObj = Proxy.NO_PROXY; proxyAuth = null
+        Authenticator.setDefault(null)
+        if (proxy.isEmpty()) return
+        try {
+            val u = URI(proxy)
+            val host = u.host ?: throw Exception("kein Host")
+            val port = if (u.port > 0) u.port else 8080
+            proxyObj = Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(host, port))
+            val info = u.rawUserInfo
+            if (!info.isNullOrEmpty()) {
+                val user = Uri.decode(info.substringBefore(':'))
+                val pass = Uri.decode(info.substringAfter(':', ""))
+                proxyAuth = "Basic " + android.util.Base64.encodeToString("$user:$pass".toByteArray(), android.util.Base64.NO_WRAP)
+                // Für HTTPS-Seiten (CONNECT-Tunnel) fragt Android hier nach den Zugangsdaten
+                Authenticator.setDefault(object : Authenticator() {
+                    override fun getPasswordAuthentication(): PasswordAuthentication? =
+                        if (requestorType == Authenticator.RequestorType.PROXY) PasswordAuthentication(user, pass.toCharArray()) else null
+                })
+            }
+        } catch (e: Exception) {
+            proxyObj = Proxy.NO_PROXY; proxyAuth = null
+            log("error", "Proxy ungültig: ${e.message}")
+        }
+    }
+
     // ---------- Abruf ----------
     private fun isQueueIt(u: String) = try { URL(u).host.lowercase().let { it == "queue-it.net" || it.endsWith(".queue-it.net") } } catch (e: Exception) { false }
 
@@ -122,6 +161,16 @@ object Store {
         .replace("&nbsp;", " ").replace("&amp;", "&")
         .replace(Regex("\\s+"), " ").trim()
 
+    private fun proxyError(e: Exception): String {
+        val m = e.message ?: e.javaClass.simpleName
+        return when {
+            m.contains("407") || m.contains("authenticat", true) -> "Proxy hat die Verbindung abgelehnt (Benutzer/Passwort prüfen)"
+            e is java.net.ConnectException || e is java.net.UnknownHostException -> "Proxy nicht erreichbar"
+            e is java.net.SocketTimeoutException -> "Proxy antwortet nicht (Zeitüberschreitung)"
+            else -> "Proxy-Fehler: $m"
+        }
+    }
+
     private class Result(val live: Boolean, val status: String, val hash: String? = null)
 
     private fun fetch(t: Target): Result {
@@ -129,14 +178,19 @@ object Store {
         var conn: HttpURLConnection? = null
         // Weiterleitungen selbst folgen (auch http↔https), max. 8
         for (i in 0 until 8) {
-            conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            conn = (URL(url).openConnection(proxyObj) as HttpURLConnection).apply {
                 instanceFollowRedirects = false
+                proxyAuth?.let { setRequestProperty("Proxy-Authorization", it) }
                 connectTimeout = 15000; readTimeout = 20000
                 setRequestProperty("User-Agent", UA)
                 setRequestProperty("Accept-Language", "de-DE,de;q=0.9,en;q=0.8")
                 setRequestProperty("Cache-Control", "no-cache")
             }
-            val code = conn.responseCode
+            val code = try { conn.responseCode } catch (e: java.io.IOException) {
+                if (proxy.isNotEmpty()) throw Exception(proxyError(e))
+                throw e
+            }
+            if (code == 407) throw Exception("Proxy hat die Verbindung abgelehnt (Benutzer/Passwort prüfen)")
             if (code in 300..399) {
                 val loc = conn.getHeaderField("Location") ?: break
                 url = URL(URL(url), loc).toString()
@@ -228,6 +282,10 @@ object Store {
             log("alert", "🦊 $title: ${t.name}")
         }
         if (sound) startAlarm(ctx, t, title)
+        else if (vibrate) try {
+            // Ohne Ton: einmal kurz vibrieren
+            ctx.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500), -1))
+        } catch (_: Exception) { }
         if (notify || sound) {
             // Antippen: App öffnet die Seite und stoppt den Alarm
             val open = PendingIntent.getActivity(
@@ -280,7 +338,7 @@ object Store {
             } catch (e: Exception) {
                 log("error", "Alarmton: ${e.message}")
             }
-            try {
+            if (vibrate) try {
                 val vib = ctx.getSystemService(Vibrator::class.java)
                 vib?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400, 600, 400, 1200), 0),
                     AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
@@ -322,9 +380,10 @@ object Store {
 
     private fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.deleteNotificationChannel("fox_alert")
         nm.createNotificationChannel(NotificationChannel(CH_ALERT, "Alarme", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Wenn eine Warteschlange aufgeht oder ein Drop live ist"
-            enableVibration(true)
+            enableVibration(false)
         })
         nm.createNotificationChannel(NotificationChannel(CH_SERVICE, "Monitor läuft", NotificationManager.IMPORTANCE_LOW).apply {
             description = "Dauerhafte Anzeige, solange überwacht wird"

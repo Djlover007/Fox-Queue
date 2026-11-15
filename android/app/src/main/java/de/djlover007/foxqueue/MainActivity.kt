@@ -102,6 +102,8 @@ class MainActivity : Activity() {
                 Store.webhook = o.optString("webhook", "")
                 Store.notify = o.optBoolean("notify", true)
                 Store.sound = o.optBoolean("sound", true)
+                Store.vibrate = o.optBoolean("vibrate", true)
+                Store.applyProxy(o.optString("proxy", ""))
             }
             Store.save(ctx); Store.log("info", "Einstellungen gespeichert.")
             return Store.stateJson()

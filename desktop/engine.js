@@ -1,6 +1,17 @@
 // Fox Queue – Überwachungslogik (Windows/Electron)
 // Ruft jede Seite ganz normal ab und meldet Zustandswechsel. Keine Proxies, kein Captcha-Lösen.
 const crypto = require('crypto');
+const { fetch, ProxyAgent } = require('undici');
+
+// Optionaler einzelner Proxy (Netzwerk-Einstellung), z. B. http://nutzer:pass@host:8080
+let proxyUrl = '';
+let dispatcher;
+function setProxy(url) {
+  url = (url || '').trim();
+  if (url === proxyUrl) return;
+  proxyUrl = url;
+  dispatcher = url ? new ProxyAgent(url) : undefined;
+}
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 FoxQueue/1.0';
 
@@ -15,6 +26,20 @@ function pageText(html) {
     .trim();
 }
 
+function friendlyError(e) {
+  if (e.name === 'AbortError') return 'Zeitüberschreitung';
+  const c = e.cause || {};
+  const msg = String(c.message || e.message || '');
+  if (proxyUrl) {
+    if (/407|cancel/i.test(msg)) return 'Proxy hat die Verbindung abgelehnt (Benutzer/Passwort prüfen)';
+    if (['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'].includes(c.code)) return `Proxy nicht erreichbar (${c.code})`;
+    if (/Proxy/i.test(msg)) return 'Proxy-Fehler: ' + msg;
+  }
+  if (c.code === 'ENOTFOUND') return 'Seite nicht gefunden (Adresse prüfen)';
+  if (c.code) return `Verbindungsfehler (${c.code})`;
+  return msg || 'Abruf fehlgeschlagen';
+}
+
 function isQueueItUrl(u) {
   try { return /(^|\.)queue-it\.net$/i.test(new URL(u).hostname); } catch { return false; }
 }
@@ -25,11 +50,14 @@ async function checkTarget(t) {
   let res, html;
   try {
     res = await fetch(t.url, {
+      dispatcher,
       redirect: 'follow',
       signal: ctrl.signal,
       headers: { 'User-Agent': UA, 'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8', 'Cache-Control': 'no-cache' },
     });
     html = await res.text();
+  } catch (e) {
+    throw new Error(friendlyError(e));
   } finally {
     clearTimeout(timer);
   }
@@ -63,4 +91,4 @@ async function checkTarget(t) {
   }
 }
 
-module.exports = { checkTarget };
+module.exports = { checkTarget, setProxy };

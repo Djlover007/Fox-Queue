@@ -11,7 +11,8 @@
     "dist": "electron-builder --win --publish never"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.3.9",
+    "undici": "^6.21.0"
   },
   "devDependencies": {
     "electron": "^33.2.0",

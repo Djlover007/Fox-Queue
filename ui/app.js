@@ -102,6 +102,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 // ---- Rendering ----
 function render() {
   if (!state) return;
+  document.body.classList.toggle('android', state.platform === 'android');
   const { running, config, targets, stats, log } = state;
   const active = targets.filter(t => t.enabled);
   const live = targets.filter(t => t.live);
@@ -140,7 +141,9 @@ function render() {
     ['Seiten', targets.length ? [...new Set(targets.map(t => esc(host(t.url))))].join(', ') : '–'],
     ['Intervall', `${config.intervalSec} s`],
     ['Benachrichtigung', config.notify ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus'],
-    ['Ton-Alarm', config.sound ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus'],
+    ['Ton-Alarm', (config.sound ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus')
+      + (state.platform === 'android' ? (config.vibrate !== false ? ' · Vibration an' : ' · Vibration aus') : '')],
+    ['Proxy', config.proxy ? '<span class="dot ok"></span>' + esc(config.proxy.replace(/\/\/[^@\/]*@/, '//***@')) : '<span class="dot"></span>direkt'],
     ['Discord-Webhook', (config.webhook ? '<span class="dot ok"></span>gesetzt' : '<span class="dot"></span>nicht gesetzt')
       + (targets.some(t => t.webhook) ? ` · ${targets.filter(t => t.webhook).length} Ziel(e) mit eigenem Kanal` : '')],
     ['Auto-Öffnen', state.platform === 'android' ? 'per Antippen der Meldung' : (config.openBrowser ? 'an' : 'aus')],
@@ -269,6 +272,8 @@ function fillSettings() {
   $('sNotify').checked = !!state.config.notify;
   $('sOpen').checked = !!state.config.openBrowser;
   $('sSound').checked = state.config.sound !== false;
+  $('sVibrate').checked = state.config.vibrate !== false;
+  $('sProxy').value = state.config.proxy || '';
   settingsDirty = false;
 }
 
@@ -349,7 +354,7 @@ $('clearStats').addEventListener('click', async () => {
   state = await bridge.clearStats(); lastStatsKey = ''; render();
 });
 
-['sInterval', 'sWebhook', 'sNotify', 'sOpen', 'sSound'].forEach(id => $(id).addEventListener('input', () => { settingsDirty = true; }));
+['sInterval', 'sWebhook', 'sNotify', 'sOpen', 'sSound', 'sVibrate', 'sProxy'].forEach(id => $(id).addEventListener('input', () => { settingsDirty = true; }));
 
 $('saveSettings').addEventListener('click', async () => {
   const intervalSec = Math.max(20, parseInt($('sInterval').value, 10) || 60);
@@ -357,7 +362,12 @@ $('saveSettings').addEventListener('click', async () => {
   if (webhook && !isHook(webhook)) {
     return alert('Das ist keine gültige Discord-Webhook-URL.');
   }
-  state = await bridge.saveConfig({ intervalSec, webhook, notify: $('sNotify').checked, openBrowser: $('sOpen').checked, sound: $('sSound').checked });
+  const proxy = $('sProxy').value.trim();
+  if (proxy && !/^https?:\/\/([^\s:@\/]+(:[^\s@\/]*)?@)?[^\s:@\/]+:\d{1,5}\/?$/i.test(proxy)) {
+    return alert('Proxy bitte so eingeben: http://host:port oder http://nutzer:passwort@host:port');
+  }
+  state = await bridge.saveConfig({ intervalSec, webhook, notify: $('sNotify').checked, openBrowser: $('sOpen').checked,
+    sound: $('sSound').checked, vibrate: $('sVibrate').checked, proxy });
   fillSettings(); render();
 });
 

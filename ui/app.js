@@ -26,6 +26,7 @@ const bridge = (() => {
       stopAlarm: () => call('stopAlarm'),
       clearStats: () => call('clearStats'),
       openUrl: (u) => call('openUrl', u),
+      openTask: (u, n) => call('openTask', u, n),
     };
   }
   // Fallback für Vorschau im Browser
@@ -167,6 +168,7 @@ function render() {
       <div class="target-actions">
         <button class="btn small" data-act="toggle" data-id="${t.id}">${t.enabled ? 'Pausieren' : 'Aktivieren'}</button>
         <button class="btn small" data-act="open" data-id="${t.id}">Öffnen</button>
+        ${bridge.openTask ? `<button class="btn small" data-act="task" data-id="${t.id}" title="Öffnet die Seite als eigenes Fenster in der App-Übersicht">Eigenes Fenster</button>` : ''}
         <button class="btn small" data-act="del" data-id="${t.id}">Löschen</button>
       </div>
       <details data-id="${t.id}" ${openHooks.has(t.id) ? 'open' : ''}>
@@ -324,6 +326,7 @@ $('targetList').addEventListener('click', async (e) => {
   if (!t) return;
   if (b.dataset.act === 'toggle') state = await bridge.updateTarget(t.id, { enabled: !t.enabled });
   if (b.dataset.act === 'open') await bridge.openUrl(t.url);
+  if (b.dataset.act === 'task' && bridge.openTask) await bridge.openTask(t.url, t.name);
   if (b.dataset.act === 'del' && confirm(`„${t.name}“ löschen?`)) state = await bridge.removeTarget(t.id);
   if (b.dataset.act === 'hook') {
     const val = document.querySelector(`input[data-hook="${t.id}"]`).value.trim();

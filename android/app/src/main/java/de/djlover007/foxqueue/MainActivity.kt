@@ -208,6 +208,12 @@ class MainActivity : Activity() {
             return Store.stateJson()
         }
 
+        /** Öffnet die Seite in einem eigenen Fenster/Task (siehe TaskActivity). */
+        @JavascriptInterface fun openTask(url: String, name: String): String {
+            if (url.startsWith("http")) runOnUiThread { TaskActivity.open(ctx, url, name) }
+            return Store.stateJson()
+        }
+
         @JavascriptInterface fun openUrl(url: String): String {
             if (url.startsWith("http")) runOnUiThread { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             return Store.stateJson()

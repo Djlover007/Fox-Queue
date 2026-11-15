@@ -31,6 +31,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Zielseite als eigener Task (eigene Karte in der App-Übersicht) -->
+        <activity
+            android:name=".TaskActivity"
+            android:exported="false"
+            android:label="Fox Queue"
+            android:autoRemoveFromRecents="true"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".MonitorService"
             android:exported="false"

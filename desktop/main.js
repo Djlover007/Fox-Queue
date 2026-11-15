@@ -278,6 +278,34 @@ ipcMain.handle('checkUpdate', () => { checkUpdate(); return snapshot(); });
 ipcMain.handle('installUpdate', () => { installUpdate(); return snapshot(); });
 ipcMain.handle('openUrl', (_e, u) => { if (/^https?:\/\//.test(u)) shell.openExternal(u); return snapshot(); });
 
+// ---- Zielseite in eigenen Fenstern (eigener Eintrag in der Taskleiste) ----
+const TASK_MAX = 20;
+const taskWins = new Set();
+function openTaskWindows(url, name, count) {
+  if (!/^https?:\/\//.test(url)) return;
+  const n = Math.min(TASK_MAX, Math.max(1, parseInt(count, 10) || 1));
+  const label = name || new URL(url).host;
+  for (let i = 1; i <= n; i++) {
+    const title = n > 1 ? `🦊 ${label} #${i}` : `🦊 ${label}`;
+    const off = ((i - 1) % 10) * 28; // leicht versetzt, damit man alle sieht
+    const w = new BrowserWindow({
+      width: 1100, height: 760, x: 80 + off, y: 60 + off,
+      backgroundColor: '#0f1115', title, autoHideMenuBar: true,
+      icon: path.join(__dirname, '..', 'ui', 'icon.png'),
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+    });
+    w.setMenuBarVisibility(false);
+    w.on('page-title-updated', (e) => e.preventDefault()); // Titel „#1, #2 …“ behalten
+    // Links, die ein neues Fenster wollen, im selben Fenster öffnen
+    w.webContents.setWindowOpenHandler(({ url: u }) => { if (/^https?:\/\//.test(u)) w.loadURL(u); return { action: 'deny' }; });
+    w.on('closed', () => taskWins.delete(w));
+    taskWins.add(w);
+    w.loadURL(url);
+  }
+  if (n > 1) log('info', `${n} Fenster geöffnet: ${label}`);
+}
+ipcMain.handle('openTask', (_e, u, name, count) => { openTaskWindows(u, name, count); return snapshot(); });
+
 // ---- Fenster ----
 function createWindow() {
   win = new BrowserWindow({
@@ -290,6 +318,8 @@ function createWindow() {
   win.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   win.on('focus', () => win.flashFrame(false));
+  // Hauptfenster zu → auch alle Zielfenster schließen, damit die App sauber beendet
+  win.on('closed', () => { for (const w of [...taskWins]) if (!w.isDestroyed()) w.close(); });
 }
 
 app.setAppUserModelId('de.djlover007.foxqueue');

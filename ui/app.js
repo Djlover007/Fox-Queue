@@ -172,7 +172,7 @@ function render() {
       <div class="target-actions">
         <button class="btn small" data-act="toggle" data-id="${t.id}">${t.enabled ? 'Pausieren' : 'Aktivieren'}</button>
         <button class="btn small" data-act="open" data-id="${t.id}">Öffnen</button>
-        ${bridge.openTask ? `<span class="task-group"><input type="number" class="task-count" data-count="${t.id}" min="1" max="${TASK_MAX}" value="${taskCount(t.id)}" title="Wie viele Fenster gleichzeitig öffnen (1–${TASK_MAX})" /><button class="btn small" data-act="task" data-id="${t.id}" title="Öffnet die Seite als eigene Fenster in der App-Übersicht">Eigene Fenster öffnen</button></span>` : ''}
+        ${bridge.openTask ? `<span class="task-group"><input type="number" class="task-count" data-count="${t.id}" min="1" max="${TASK_MAX}" value="${taskCount(t.id)}" title="Wie viele Fenster gleichzeitig öffnen (1–${TASK_MAX})" /><button class="btn small" data-act="task" data-id="${t.id}" title="Öffnet die Seite in eigenen Fenstern">Eigene Fenster öffnen</button></span>` : ''}
         <button class="btn small" data-act="del" data-id="${t.id}">Löschen</button>
       </div>
       <details data-id="${t.id}" ${openHooks.has(t.id) ? 'open' : ''}>

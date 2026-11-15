@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('fox', {
   checkUpdate: call('checkUpdate'),
   installUpdate: call('installUpdate'),
   openUrl: call('openUrl'),
+  openTask: call('openTask'),
 });

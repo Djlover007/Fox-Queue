@@ -362,7 +362,15 @@ $('saveSettings').addEventListener('click', async () => {
   if (webhook && !isHook(webhook)) {
     return alert('Das ist keine gültige Discord-Webhook-URL.');
   }
-  const proxy = $('sProxy').value.trim();
+  let proxy = $('sProxy').value.trim();
+  // Anbieter-Format host:port:nutzer:passwort automatisch umwandeln
+  const m = proxy.match(/^(?:(https?|socks5?):\/\/)?([^\s:@\/]+):(\d{1,5}):([^\s:]+):(.+)$/i);
+  if (m) {
+    proxy = `${(m[1] || 'http').toLowerCase()}://${encodeURIComponent(m[4])}:${encodeURIComponent(m[5])}@${m[2]}:${m[3]}`;
+  } else if (/^[^\s:@\/]+:\d{1,5}$/.test(proxy)) {
+    proxy = 'http://' + proxy;
+  }
+  $('sProxy').value = proxy;
   if (proxy && !/^https?:\/\/([^\s:@\/]+(:[^\s@\/]*)?@)?[^\s:@\/]+:\d{1,5}\/?$/i.test(proxy)) {
     return alert('Proxy bitte so eingeben: http://host:port oder http://nutzer:passwort@host:port');
   }

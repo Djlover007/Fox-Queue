@@ -47,6 +47,18 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        intent?.let { if (it.action == Updater.ACTION_INSTALL_STATUS) Updater.handleInstallStatus(this, it) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == Updater.ACTION_INSTALL_STATUS) Updater.handleInstallStatus(this, intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Beim Öffnen nach Updates schauen (höchstens einmal pro Stunde)
+        if (System.currentTimeMillis() - Updater.lastCheck > 3600_000L) Thread { Updater.check(this) }.start()
     }
 
     @Deprecated("Deprecated in Java")
@@ -127,6 +139,17 @@ class MainActivity : Activity() {
                 Store.alarm(ctx, Store.Target("test", "Test", "https://github.com/Djlover007", "keyword", "", true),
                     "Test-Alarm", "Wenn du das siehst, funktionieren die Benachrichtigungen.", count = false)
             }.start()
+            return Store.stateJson()
+        }
+
+        @JavascriptInterface fun checkUpdate(): String {
+            Thread { Updater.check(ctx) }.start()
+            Updater.status = "checking"
+            return Store.stateJson()
+        }
+
+        @JavascriptInterface fun installUpdate(): String {
+            Updater.install(ctx)
             return Store.stateJson()
         }
 

@@ -11,8 +11,9 @@ android {
         applicationId = "de.djlover007.foxqueue"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        // Wird in GitHub Actions mit der Laufnummer gesetzt (Version 1.0.<Lauf>)
+        versionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 1
+        versionName = (project.findProperty("appVersionName") as String?) ?: "1.0.0"
     }
 
     // Fester Schlüssel, damit Updates über die alte Version installiert werden können

@@ -18,14 +18,24 @@ android/   Android-App (Kotlin): WebView + Vordergrund-Dienst
 .github/   GitHub Actions: baut APK und EXE automatisch
 ```
 
+## Auto-Update
+
+Jeder Push auf `main` baut die Version `1.0.<Laufnummer>` und veröffentlicht APK und EXE als Release in
+**Djlover007/Fox-Queue-Downloads** (öffentlich, damit die Apps ohne Login an die Updates kommen; der Code bleibt hier privat).
+
+- **Windows (Installer):** lädt Updates im Hintergrund, installiert sie beim Beenden oder per Klick auf „Neu starten & installieren“.
+- **Windows (Portable):** meldet neue Versionen und öffnet die Download-Seite.
+- **Android:** meldet neue Versionen (beim Öffnen und alle 6 h im Hintergrund), „Jetzt aktualisieren“ lädt die APK und startet die Installation. Beim ersten Mal muss „Apps aus dieser Quelle installieren“ erlaubt werden.
+
+Einmalige Einrichtung:
+1. Öffentliches Repo `Fox-Queue-Downloads` anlegen (mit README, damit es nicht leer ist).
+2. Fine-grained Token erstellen: GitHub → Settings → Developer settings → Fine-grained tokens → nur Repo `Fox-Queue-Downloads`, Berechtigung *Contents: Read and write*.
+3. Im Repo `fox-queue` unter Settings → Secrets and variables → Actions ein Secret `DOWNLOADS_TOKEN` mit diesem Token anlegen.
+
 ## Bauen
 
-**Automatisch (empfohlen):** Repo auf GitHub pushen → Reiter *Actions* → Lauf „Build Fox Queue“ öffnen → unten unter *Artifacts* `FoxQueue-Android` (APK) und `FoxQueue-Windows` (Installer + Portable-EXE) herunterladen.
-Mit einem Tag wie `v1.0.0` landen beide Dateien zusätzlich als Release auf der Repo-Seite:
-
-```
-git tag v1.0.0 && git push --tags
-```
+**Automatisch (empfohlen):** Auf `main` pushen. Die fertigen Dateien liegen danach unter
+https://github.com/Djlover007/Fox-Queue-Downloads/releases/latest und zusätzlich im Actions-Lauf unter *Artifacts*.
 
 **Lokal Windows:** `npm install` und dann `npm start` (testen) oder `npm run dist` (EXE in `dist/`).
 

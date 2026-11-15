@@ -10,6 +10,9 @@
     "start": "electron .",
     "dist": "electron-builder --win --publish never"
   },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
@@ -18,13 +21,17 @@
     "appId": "de.djlover007.foxqueue",
     "productName": "Fox Queue",
     "files": ["desktop/**/*", "ui/**/*", "package.json"],
+    "publish": [
+      { "provider": "github", "owner": "Djlover007", "repo": "Fox-Queue-Downloads", "releaseType": "release" }
+    ],
     "win": {
       "target": ["nsis", "portable"],
       "icon": "ui/icon.png"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "FoxQueue-Setup-${version}.${ext}"
     },
     "portable": {
       "artifactName": "FoxQueue-Portable-${version}.exe"

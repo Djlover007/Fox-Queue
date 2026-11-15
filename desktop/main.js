@@ -4,6 +4,80 @@ const path = require('path');
 const fs = require('fs');
 const { checkTarget } = require('./engine');
 
+// ---- Auto-Update ----
+const RELEASES_API = 'https://api.github.com/repos/Djlover007/Fox-Queue-Downloads/releases/latest';
+const RELEASES_PAGE = 'https://github.com/Djlover007/Fox-Queue-Downloads/releases/latest';
+const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR;
+const update = { status: 'idle', latest: '', progress: 0, message: '', current: '', canInstall: false };
+let autoUpdater = null;
+
+function newer(a, b) {
+  const x = String(a).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  const y = String(b).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return d > 0;
+  }
+  return false;
+}
+
+function setupUpdater() {
+  update.current = app.getVersion();
+  // Installierte Version (NSIS): echtes Auto-Update mit electron-updater
+  if (app.isPackaged && !isPortable) {
+    try {
+      autoUpdater = require('electron-updater').autoUpdater;
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.on('checking-for-update', () => { update.status = 'checking'; update.message = ''; });
+      autoUpdater.on('update-not-available', () => { update.status = 'latest'; });
+      autoUpdater.on('update-available', (i) => { update.status = 'downloading'; update.latest = i.version; update.progress = 0; log('info', `Update ${i.version} wird geladen …`); });
+      autoUpdater.on('download-progress', (p) => { update.progress = Math.round(p.percent); });
+      autoUpdater.on('update-downloaded', (i) => {
+        update.status = 'ready'; update.latest = i.version; update.progress = 100; update.canInstall = true;
+        log('info', `Update ${i.version} ist bereit – wird beim Beenden installiert.`);
+        if (Notification.isSupported()) {
+          const n = new Notification({ title: 'Fox Queue Update bereit', body: `Version ${i.version} – klicken zum Neustarten und Installieren.` });
+          n.on('click', () => installUpdate());
+          n.show();
+        }
+      });
+      autoUpdater.on('error', (e) => { update.status = 'error'; update.message = String(e && e.message || e).split('\n')[0]; });
+    } catch (e) {
+      autoUpdater = null;
+    }
+  }
+  checkUpdate();
+  setInterval(checkUpdate, 6 * 3600 * 1000);
+}
+
+async function checkUpdate() {
+  if (['downloading', 'ready'].includes(update.status)) return;
+  if (autoUpdater) { autoUpdater.checkForUpdates().catch(() => {}); return; }
+  // Portable/Entwicklung: nur prüfen und Download-Seite anbieten
+  update.status = 'checking'; update.message = '';
+  try {
+    const res = await fetch(RELEASES_API, { headers: { 'User-Agent': 'FoxQueue-Updater', Accept: 'application/vnd.github+json' } });
+    if (res.status === 404) { update.status = 'latest'; update.message = 'Noch keine Version veröffentlicht.'; return; }
+    if (!res.ok) throw new Error(`GitHub antwortet mit HTTP ${res.status}`);
+    const tag = String((await res.json()).tag_name || '').replace(/^v/, '');
+    update.latest = tag;
+    update.status = newer(tag, update.current) ? 'available' : 'latest';
+    if (update.status === 'available') log('info', `Update verfügbar: Version ${tag}`);
+  } catch (e) {
+    update.status = 'error'; update.message = e.message;
+  }
+}
+
+function installUpdate() {
+  if (autoUpdater && update.status === 'ready') {
+    stop();
+    setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  } else if (update.status === 'available') {
+    shell.openExternal(RELEASES_PAGE);
+  }
+}
+
 const DATA_FILE = () => path.join(app.getPath('userData'), 'foxqueue.json');
 
 const state = {
@@ -130,7 +204,7 @@ function stop() {
 }
 
 // ---- IPC ----
-const snapshot = () => JSON.parse(JSON.stringify(state));
+const snapshot = () => JSON.parse(JSON.stringify({ ...state, version: app.getVersion(), update }));
 ipcMain.handle('getState', () => snapshot());
 ipcMain.handle('saveConfig', (_e, c) => {
   state.config = { ...state.config, ...c, intervalSec: Math.max(20, Number(c.intervalSec) || 60) };
@@ -159,6 +233,8 @@ ipcMain.handle('testAlert', async () => {
   state.stats.alerts--;
   return snapshot();
 });
+ipcMain.handle('checkUpdate', () => { checkUpdate(); return snapshot(); });
+ipcMain.handle('installUpdate', () => { installUpdate(); return snapshot(); });
 ipcMain.handle('openUrl', (_e, u) => { if (/^https?:\/\//.test(u)) shell.openExternal(u); return snapshot(); });
 
 // ---- Fenster ----
@@ -176,5 +252,5 @@ function createWindow() {
 }
 
 app.setAppUserModelId('de.djlover007.foxqueue');
-app.whenReady().then(() => { load(); createWindow(); });
+app.whenReady().then(() => { load(); createWindow(); setTimeout(setupUpdater, 4000); });
 app.on('window-all-closed', () => { stop(); app.quit(); });

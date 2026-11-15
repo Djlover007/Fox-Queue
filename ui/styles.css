@@ -120,6 +120,16 @@ h2 { font-size: 13px; letter-spacing: .8px; text-transform: uppercase; }
 .badge.err { background: rgba(239,90,90,.12); border-color: var(--red); color: var(--red); }
 .target-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* Update-Leiste */
+.update-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: rgba(232,137,58,.12); border: 1px solid var(--accent); border-radius: 10px;
+  padding: 10px 14px; margin: -8px 0 18px;
+}
+.update-bar span { flex: 1; min-width: 160px; }
+.update-progress { flex: 1; min-width: 120px; height: 8px; background: var(--panel2); border-radius: 99px; overflow: hidden; }
+.update-progress div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+
 /* Mobil */
 @media (max-width: 760px) {
   body { flex-direction: column; }

@@ -32,12 +32,14 @@ object Store {
     var alerts = 0; var errors = 0; var checks = 0
     private val log = ArrayList<JSONObject>()
     private var loaded = false
+    lateinit var appCtx: Context
     private var alertId = 1000
 
     // ---------- Speicher ----------
     @Synchronized fun load(ctx: Context) {
         if (loaded) return
         loaded = true
+        appCtx = ctx.applicationContext
         createChannels(ctx)
         val p = ctx.getSharedPreferences("fox", Context.MODE_PRIVATE)
         intervalSec = p.getInt("interval", 60)
@@ -79,6 +81,8 @@ object Store {
             .put("targets", ts)
             .put("stats", JSONObject().put("alerts", alerts).put("errors", errors).put("checks", checks))
             .put("log", JSONArray(log))
+            .put("version", Updater.current(appCtx))
+            .put("update", Updater.json(appCtx))
             .toString()
     }
 

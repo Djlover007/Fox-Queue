@@ -21,11 +21,13 @@ const bridge = (() => {
       stop: () => call('stop'),
       clearLog: () => call('clearLog'),
       testAlert: () => call('testAlert'),
+      checkUpdate: () => call('checkUpdate'),
+      installUpdate: () => call('installUpdate'),
       openUrl: (u) => call('openUrl', u),
     };
   }
   // Fallback für Vorschau im Browser
-  let s = { running: false, platform: 'web', config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false }, targets: [], stats: { alerts: 0, errors: 0, checks: 0 }, log: [] };
+  let s = { running: false, platform: 'web', version: 'Vorschau', update: { status: 'available', latest: '1.0.9', progress: 0, message: '' }, config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false }, targets: [], stats: { alerts: 0, errors: 0, checks: 0 }, log: [] };
   const ok = () => Promise.resolve(s);
   return {
     getState: ok,
@@ -37,6 +39,8 @@ const bridge = (() => {
     stop: () => { s.running = false; return ok(); },
     clearLog: () => { s.log = []; return ok(); },
     testAlert: () => ok(),
+    checkUpdate: () => ok(),
+    installUpdate: () => ok(),
     openUrl: (u) => { window.open(u, '_blank'); return ok(); },
   };
 })();
@@ -105,6 +109,8 @@ function render() {
     ['Auto-Öffnen', state.platform === 'android' ? 'per Antippen der Meldung' : (config.openBrowser ? 'an' : 'aus')],
   ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join('');
 
+  renderUpdate();
+
   // Ziele
   const list = $('targetList');
   if (!targets.length) { list.innerHTML = '<div class="card empty">Noch keine Ziele. Füge oben eins hinzu.</div>'; return; }
@@ -122,6 +128,34 @@ function render() {
         <button class="btn small" data-act="del" data-id="${t.id}">Löschen</button>
       </div></div>`;
   }).join('');
+}
+
+const UPDATE_STATUS = {
+  idle: 'noch nicht geprüft', checking: 'wird geprüft …', latest: 'aktuell', available: 'Update verfügbar',
+  downloading: 'wird geladen …', ready: 'bereit zur Installation', installing: 'wird installiert …', error: 'Fehler',
+};
+
+function renderUpdate() {
+  const u = state.update || { status: 'idle' };
+  $('brandVersion').textContent = 'Version ' + (state.version || '–');
+  $('uCurrent').textContent = state.version || '–';
+  $('uLatest').textContent = u.latest || '–';
+  $('uStatus').textContent = (UPDATE_STATUS[u.status] || u.status) + (u.message ? ' – ' + u.message : '');
+
+  const show = ['available', 'downloading', 'ready', 'installing'].includes(u.status) || (u.message && u.status === 'available');
+  $('updateBar').classList.toggle('hidden', !show);
+  if (!show) return;
+  const busy = u.status === 'downloading' || u.status === 'installing';
+  $('updateProgress').classList.toggle('hidden', !busy);
+  $('updateProgressFill').style.width = (u.progress || 0) + '%';
+  $('updateBtn').classList.toggle('hidden', busy);
+  const isPortableLike = state.platform === 'windows' && u.status === 'available';
+  $('updateBtn').textContent = u.status === 'ready' ? 'Neu starten & installieren' : (isPortableLike ? 'Herunterladen' : 'Jetzt aktualisieren');
+  $('updateText').textContent =
+    u.status === 'downloading' ? `🦊 Update ${u.latest} wird geladen … ${u.progress || 0} %`
+    : u.status === 'installing' ? `🦊 Update ${u.latest} wird installiert …`
+    : u.status === 'ready' ? `🦊 Update ${u.latest} ist bereit.`
+    : `🦊 Neue Version ${u.latest} verfügbar.` + (u.message ? ' ' + u.message : '');
 }
 
 function fillSettings() {
@@ -192,6 +226,9 @@ $('saveSettings').addEventListener('click', async () => {
   state = await bridge.saveConfig({ intervalSec, webhook, notify: $('sNotify').checked, openBrowser: $('sOpen').checked });
   fillSettings(); render();
 });
+
+$('updateBtn').addEventListener('click', async () => { state = await bridge.installUpdate(); render(); });
+$('checkUpdateBtn').addEventListener('click', async () => { state = await bridge.checkUpdate(); render(); });
 
 $('testAlert').addEventListener('click', async () => { state = await bridge.testAlert(); render(); });
 

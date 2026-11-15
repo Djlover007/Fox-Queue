@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld('fox', {
   stop: call('stop'),
   clearLog: call('clearLog'),
   testAlert: call('testAlert'),
+  checkUpdate: call('checkUpdate'),
+  installUpdate: call('installUpdate'),
   openUrl: call('openUrl'),
 });

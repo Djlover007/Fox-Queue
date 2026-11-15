@@ -12,7 +12,7 @@
       <div class="logo">🦊</div>
       <div>
         <div class="brand-name">FOX-QUEUE</div>
-        <div class="brand-version">Version 1.0.0</div>
+        <div class="brand-version" id="brandVersion">Version –</div>
       </div>
     </div>
     <nav class="nav">
@@ -36,6 +36,12 @@
       </div>
       <button class="btn primary" id="toggleBtn">Start</button>
     </header>
+
+    <div class="update-bar hidden" id="updateBar">
+      <span id="updateText">Update verfügbar</span>
+      <div class="update-progress hidden" id="updateProgress"><div id="updateProgressFill"></div></div>
+      <button class="btn primary small" id="updateBtn">Jetzt aktualisieren</button>
+    </div>
 
     <!-- DASHBOARD -->
     <section class="page active" id="page-dashboard">
@@ -104,6 +110,18 @@
             <button class="btn" id="testAlert">Test-Alarm senden</button>
           </div>
         </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Updates</h2></div>
+        <div class="kv">
+          <div class="k">Installiert</div><div class="v" id="uCurrent">–</div>
+          <div class="k">Neueste</div><div class="v" id="uLatest">–</div>
+          <div class="k">Status</div><div class="v" id="uStatus">–</div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn" id="checkUpdateBtn">Nach Updates suchen</button>
+        </div>
+        <p class="muted small-text">Fox Queue sucht beim Start und alle 6 Stunden automatisch nach neuen Versionen.</p>
       </div>
       <div class="card">
         <div class="card-head"><h2>So funktioniert's</h2></div>

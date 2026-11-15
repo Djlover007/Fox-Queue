@@ -19,12 +19,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: APK bauen
         working-directory: android
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
         run: gradle assembleRelease --no-daemon
       - name: APK umbenennen
         run: cp android/app/build/outputs/apk/release/app-release.apk FoxQueue.apk

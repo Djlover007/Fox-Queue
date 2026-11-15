@@ -26,7 +26,7 @@ const bridge = (() => {
       stopAlarm: () => call('stopAlarm'),
       clearStats: () => call('clearStats'),
       openUrl: (u) => call('openUrl', u),
-      openTask: (u, n) => call('openTask', u, n),
+      openTask: (u, n, c) => call('openTask', u, n, String(c || 1)),
     };
   }
   // Fallback für Vorschau im Browser
@@ -62,6 +62,10 @@ const MODE_LABEL = { queue: 'Queue-it', keyword: 'Text erscheint', gone: 'Text v
 
 let state = null;
 let settingsDirty = false;
+// Wie viele Fenster „Eigenes Fenster“ pro Ziel öffnet (wird auf dem Gerät gemerkt)
+const TASK_MAX = 20;
+const taskCount = (id) => { try { return Math.min(TASK_MAX, Math.max(1, parseInt(localStorage.getItem('taskCount_' + id), 10) || 1)); } catch { return 1; } };
+const setTaskCount = (id, n) => { try { localStorage.setItem('taskCount_' + id, String(n)); } catch {} };
 const openHooks = new Set();   // aufgeklappte „Discord-Kanal“-Bereiche
 let lastListHtml = '', lastFeedHtml = '', lastStatsKey = '';
 const isHook = (u) => /^https:\/\/(canary\.|ptb\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(u);
@@ -168,7 +172,7 @@ function render() {
       <div class="target-actions">
         <button class="btn small" data-act="toggle" data-id="${t.id}">${t.enabled ? 'Pausieren' : 'Aktivieren'}</button>
         <button class="btn small" data-act="open" data-id="${t.id}">Öffnen</button>
-        ${bridge.openTask ? `<button class="btn small" data-act="task" data-id="${t.id}" title="Öffnet die Seite als eigenes Fenster in der App-Übersicht">Eigenes Fenster</button>` : ''}
+        ${bridge.openTask ? `<span class="task-group"><input type="number" class="task-count" data-count="${t.id}" min="1" max="${TASK_MAX}" value="${taskCount(t.id)}" title="Wie viele Fenster gleichzeitig öffnen (1–${TASK_MAX})" /><button class="btn small" data-act="task" data-id="${t.id}" title="Öffnet die Seite als eigene Fenster in der App-Übersicht">Eigene Fenster öffnen</button></span>` : ''}
         <button class="btn small" data-act="del" data-id="${t.id}">Löschen</button>
       </div>
       <details data-id="${t.id}" ${openHooks.has(t.id) ? 'open' : ''}>
@@ -319,6 +323,14 @@ $('addTarget').addEventListener('click', async () => {
   render();
 });
 
+// Anzahl der Fenster merken, sobald du sie änderst
+$('targetList').addEventListener('change', (e) => {
+  const inp = e.target.closest('input[data-count]');
+  if (!inp) return;
+  const n = Math.min(TASK_MAX, Math.max(1, parseInt(inp.value, 10) || 1));
+  inp.value = n; setTaskCount(inp.dataset.count, n); lastListHtml = '';
+});
+
 $('targetList').addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-act]');
   if (!b) return;
@@ -326,7 +338,14 @@ $('targetList').addEventListener('click', async (e) => {
   if (!t) return;
   if (b.dataset.act === 'toggle') state = await bridge.updateTarget(t.id, { enabled: !t.enabled });
   if (b.dataset.act === 'open') await bridge.openUrl(t.url);
-  if (b.dataset.act === 'task' && bridge.openTask) await bridge.openTask(t.url, t.name);
+  if (b.dataset.act === 'task' && bridge.openTask) {
+    const inp = document.querySelector(`input[data-count="${t.id}"]`);
+    const n = Math.min(TASK_MAX, Math.max(1, parseInt(inp && inp.value, 10) || 1));
+    if (inp) inp.value = n;
+    setTaskCount(t.id, n);
+    lastListHtml = '';
+    await bridge.openTask(t.url, t.name, n);
+  }
   if (b.dataset.act === 'del' && confirm(`„${t.name}“ löschen?`)) state = await bridge.removeTarget(t.id);
   if (b.dataset.act === 'hook') {
     const val = document.querySelector(`input[data-hook="${t.id}"]`).value.trim();

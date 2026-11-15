@@ -208,9 +208,11 @@ class MainActivity : Activity() {
             return Store.stateJson()
         }
 
-        /** Öffnet die Seite in einem eigenen Fenster/Task (siehe TaskActivity). */
-        @JavascriptInterface fun openTask(url: String, name: String): String {
-            if (url.startsWith("http")) runOnUiThread { TaskActivity.open(ctx, url, name) }
+        /** Öffnet die Seite in [count] eigenen Fenstern/Tasks (siehe TaskActivity). */
+        @JavascriptInterface fun openTask(url: String, name: String, count: String): String {
+            val n = (count.toIntOrNull() ?: 1).coerceIn(1, TaskActivity.MAX_WINDOWS)
+            if (url.startsWith("http")) runOnUiThread { TaskActivity.open(ctx, url, name, n) }
+            if (n > 1) Store.log("info", "$n Fenster geöffnet: $name")
             return Store.stateJson()
         }
 

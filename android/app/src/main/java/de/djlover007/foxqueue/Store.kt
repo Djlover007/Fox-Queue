@@ -45,6 +45,8 @@ object Store {
     var notify = true
     var sound = true
     var vibrate = true
+    var openBrowser = false
+    @Volatile var foreground = false   // App gerade sichtbar?
     var proxy = ""   // optionaler einzelner Proxy: http://[nutzer:pass@]host:port
     @Volatile private var client: OkHttpClient = OkHttpClient()
     private val events = ArrayList<JSONObject>()  // Drop-Statistik
@@ -71,6 +73,7 @@ object Store {
         notify = p.getBoolean("notify", true)
         sound = p.getBoolean("sound", true)
         vibrate = p.getBoolean("vibrate", true)
+        openBrowser = p.getBoolean("openBrowser", false)
         applyProxy(p.getString("proxy", "") ?: "")
         val ev = JSONArray(p.getString("events", "[]"))
         for (i in 0 until ev.length()) events.add(ev.getJSONObject(i))
@@ -87,7 +90,7 @@ object Store {
             arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook))
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
-            .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putString("proxy", proxy)
+            .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putBoolean("openBrowser", openBrowser).putString("proxy", proxy)
             .putString("targets", arr.toString()).putString("events", JSONArray(events).toString()).apply()
     }
 
@@ -108,7 +111,7 @@ object Store {
         }
         return JSONObject()
             .put("running", running).put("platform", "android")
-            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", false).put("sound", sound).put("vibrate", vibrate).put("proxy", proxy))
+            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", openBrowser).put("sound", sound).put("vibrate", vibrate).put("proxy", proxy))
             .put("events", JSONArray(events))
             .put("ringing", ringing ?: JSONObject.NULL)
             .put("targets", ts)
@@ -230,10 +233,31 @@ object Store {
     }
 
     /** Eine Runde über alle aktiven Ziele. Läuft im Hintergrund-Thread des Dienstes. */
+    private const val PARALLEL = 4
+
+    /** Bis zu 4 Ziele gleichzeitig prüfen – jedes Ziel trotzdem nur einmal pro Intervall. */
     fun runRound(ctx: Context) {
         val list = synchronized(this) { targets.filter { it.enabled } }
-        for (t in list) {
-            if (!running) return
+        if (list.isEmpty()) return
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(PARALLEL, list.size))
+        try {
+            val jobs = list.map { t ->
+                pool.submit {
+                    Thread.sleep((Math.random() * 300).toLong())
+                    if (running) checkOne(ctx, t)
+                }
+            }
+            for (j in jobs) {
+                try { j.get() }
+                catch (e: InterruptedException) { Thread.currentThread().interrupt(); return }  // Monitor gestoppt
+                catch (_: Exception) { }
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    private fun checkOne(ctx: Context, t: Target) {
             try {
                 val r = fetch(t)
                 synchronized(this) {
@@ -265,8 +289,6 @@ object Store {
                     t.lastError = msg
                 }
             }
-            Thread.sleep(400L + (Math.random() * 600).toLong())
-        }
     }
 
     // ---------- Alarm ----------
@@ -285,7 +307,19 @@ object Store {
             // Ohne Ton: einmal kurz vibrieren
             ctx.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500), -1))
         } catch (_: Exception) { }
-        if (notify || sound) {
+        // Seite automatisch öffnen: sofort, wenn die App offen ist – sonst per Vollbild-Benachrichtigung
+        var autoOpen: PendingIntent? = null
+        if (openBrowser) {
+            if (foreground) main.post {
+                try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(t.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
+            } else autoOpen = PendingIntent.getActivity(
+                ctx, alertId + 50_000,
+                Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_AUTO_OPEN).putExtra("url", t.url)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        }
+        if (notify || sound || autoOpen != null) {
             // Antippen: App öffnet die Seite und stoppt den Alarm
             val open = PendingIntent.getActivity(
                 ctx, alertId,
@@ -304,6 +338,7 @@ object Store {
                 .setStyle(Notification.BigTextStyle().bigText("${t.name}\n$body\n${t.url}"))
                 .setContentIntent(open)
                 .setDeleteIntent(silence)
+                .apply { autoOpen?.let { setFullScreenIntent(it, true) } }
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_ALARM)
                 .apply {

@@ -58,6 +58,21 @@ class MainActivity : Activity() {
     private fun handleIntent(intent: Intent) {
         when (intent.action) {
             Updater.ACTION_INSTALL_STATUS -> Updater.handleInstallStatus(this, intent)
+            ACTION_AUTO_OPEN -> {
+                // Von der Vollbild-Benachrichtigung: Bildschirm an, ggf. Entsperren anfordern, Seite öffnen. Alarm läuft weiter.
+                if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
+                val url = intent.getStringExtra("url") ?: return
+                val km = getSystemService(android.app.KeyguardManager::class.java)
+                fun open() {
+                    if (!url.startsWith("http")) return
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) { }
+                }
+                if (Build.VERSION.SDK_INT >= 27 && km.isKeyguardLocked) {
+                    km.requestDismissKeyguard(this, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                        override fun onDismissSucceeded() { open() }
+                    })
+                } else open()
+            }
             ACTION_OPEN_ALERT -> {
                 Store.stopAlarm()
                 intent.getStringExtra("url")?.let { u ->
@@ -69,6 +84,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Store.foreground = true
         // Beim Öffnen nach Updates schauen (höchstens einmal pro Stunde)
         if (System.currentTimeMillis() - Updater.lastCheck > 3600_000L) Thread { Updater.check(this) }.start()
     }
@@ -88,7 +104,22 @@ class MainActivity : Activity() {
     }
 
     /** Wird von ui/app.js aufgerufen. Alle Methoden liefern den kompletten Zustand als JSON. */
-    companion object { const val ACTION_OPEN_ALERT = "de.djlover007.foxqueue.OPEN_ALERT" }
+    companion object {
+        const val ACTION_OPEN_ALERT = "de.djlover007.foxqueue.OPEN_ALERT"
+        const val ACTION_AUTO_OPEN = "de.djlover007.foxqueue.AUTO_OPEN"
+    }
+
+    override fun onPause() { Store.foreground = false; super.onPause() }
+
+    /** Android 14+: Vollbild-Benachrichtigungen müssen erlaubt werden. */
+    private fun askFullScreenPermission() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            val nm = getSystemService(android.app.NotificationManager::class.java)
+            if (!nm.canUseFullScreenIntent()) try {
+                startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+            } catch (_: Exception) { }
+        }
+    }
 
     inner class Bridge {
         private val ctx get() = this@MainActivity
@@ -103,9 +134,11 @@ class MainActivity : Activity() {
                 Store.notify = o.optBoolean("notify", true)
                 Store.sound = o.optBoolean("sound", true)
                 Store.vibrate = o.optBoolean("vibrate", true)
+                Store.openBrowser = o.optBoolean("openBrowser", false)
                 Store.applyProxy(o.optString("proxy", ""))
             }
             Store.save(ctx); Store.log("info", "Einstellungen gespeichert.")
+            if (Store.openBrowser) runOnUiThread { askFullScreenPermission() }
             return Store.stateJson()
         }
 

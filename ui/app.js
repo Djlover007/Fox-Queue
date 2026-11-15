@@ -146,7 +146,8 @@ function render() {
     ['Proxy', config.proxy ? '<span class="dot ok"></span>' + esc(config.proxy.replace(/\/\/[^@\/]*@/, '//***@')) : '<span class="dot"></span>direkt'],
     ['Discord-Webhook', (config.webhook ? '<span class="dot ok"></span>gesetzt' : '<span class="dot"></span>nicht gesetzt')
       + (targets.some(t => t.webhook) ? ` · ${targets.filter(t => t.webhook).length} Ziel(e) mit eigenem Kanal` : '')],
-    ['Auto-Öffnen', state.platform === 'android' ? 'per Antippen der Meldung' : (config.openBrowser ? 'an' : 'aus')],
+    ['Auto-Öffnen', config.openBrowser ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus (Meldung antippen)'],
+    ['Prüfung', 'bis zu 4 Ziele gleichzeitig'],
   ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join('');
 
   renderUpdate();

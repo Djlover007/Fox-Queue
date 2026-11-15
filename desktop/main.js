@@ -166,10 +166,23 @@ async function sendDiscord(hook, title, name, body, url) {
 }
 
 // ---- Prüfschleife ----
+// Bis zu 4 Ziele gleichzeitig prüfen (jedes Ziel trotzdem nur einmal pro Intervall)
+const PARALLEL = 4;
+
 async function runRound() {
   const list = state.targets.filter(t => t.enabled);
-  for (const t of list) {
-    if (!state.running) return;
+  let next = 0;
+  const worker = async () => {
+    while (state.running && next < list.length) {
+      const t = list[next++];
+      await new Promise(r => setTimeout(r, Math.random() * 300)); // leicht versetzt starten
+      if (state.running) await checkOne(t);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, list.length) }, worker));
+}
+
+async function checkOne(t) {
     try {
       const r = await checkTarget(t);
       state.stats.checks++;
@@ -201,8 +214,6 @@ async function runRound() {
       if (t.lastError !== msg) log('error', `${t.name}: ${msg}`);
       t.lastError = msg;
     }
-    await new Promise(r => setTimeout(r, 400 + Math.random() * 600));
-  }
 }
 
 function scheduleNext() {

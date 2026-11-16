@@ -6,8 +6,16 @@ Drop- und Queue-Monitor für **Windows** und **Android**. Fox Queue beobachtet S
 - ein **Text verschwindet** (z. B. „Ausverkauft“) oder
 - sich die **Seite ändert**.
 
-Alarm gibt es als Benachrichtigung auf dem Gerät (antippen öffnet die Seite) und optional per **Discord-Webhook**.
-Danach stellst du dich ganz normal mit deinem eigenen Browser an. Unter *Ziele* kannst du eine Seite auch in mehreren eigenen Fenstern öffnen (bis 20). Taucht dort ein Captcha auf, meldet Fox Queue das (Benachrichtigung, Taskleiste blinkt, optional Discord) – lösen musst du es selbst. Verlässt ein Fenster die Queue-it-Warteschlange, gibt es den Alarm „Du bist dran“ – antippen bzw. anklicken holt genau dieses Fenster nach vorn. Fox Queue nutzt keine Proxies, löst keine Captchas und drängelt nicht vor.
+Alarm gibt es als Benachrichtigung auf dem Gerät (antippen öffnet die Seite) und optional per **Discord-Webhook** und **Telegram**.
+Danach stellst du dich ganz normal selbst an. Fox Queue löst keine Captchas und drängelt nicht vor.
+
+## Funktionen
+
+- **Ziele:** pro Ziel eigenes Prüfintervall, eigener Discord-Kanal und eine **Startzeit** (Monitor startet von selbst und öffnet die Fenster). Ziele lassen sich bearbeiten und unter *Einstellungen → Ziele übertragen* als Text aufs andere Gerät mitnehmen.
+- **Eigene Fenster:** eine Seite in bis zu 20 eigenen Fenstern öffnen. Das Dashboard zeigt für jedes Fenster den Status (Lädt, Warteschlange mit Platz und Wartezeit, Captcha, Durch) und kann sie zeigen oder schließen; unter Windows auch als Raster anordnen.
+- **„Du bist dran“:** Verlässt ein Fenster die Warteschlange (Queue-it, Cloudflare Waiting Room, shop-eigene Warteseiten), gibt es Alarm. Antippen holt genau dieses Fenster nach vorn.
+- **Captcha-Hinweis:** Taucht in einem Fenster ein Captcha auf, meldet Fox Queue das (abschaltbar, wahlweise mit Ton). Lösen musst du es selbst.
+- **Android:** Hält das System ein Fenster im Hintergrund an, lädt Fox Queue es neu bzw. meldet es.
 
 ## Aufbau
 
@@ -15,7 +23,8 @@ Danach stellst du dich ganz normal mit deinem eigenen Browser an. Unter *Ziele* 
 ui/        gemeinsame Oberfläche (HTML/CSS/JS), Dashboard im Dark-Look
 desktop/   Windows-App (Electron): main.js, engine.js, preload.js
 android/   Android-App (Kotlin): WebView + Vordergrund-Dienst
-.github/   GitHub Actions: baut APK und EXE automatisch
+tests/     automatische Tests (Seiten-Erkennung, Queue-Adressen, Oberfläche) – `npm test`
+.github/   GitHub Actions: testet, baut APK und EXE automatisch
 ```
 
 ## Auto-Update
@@ -45,5 +54,6 @@ https://github.com/Djlover007/Fox-Queue-Downloads/releases/latest und zusätzlic
 
 - Das Prüfintervall ist auf mindestens 20 Sekunden begrenzt. 60 s ist für die meisten Seiten gut; zu häufige Abrufe führen zu Sperren (HTTP 403/429).
 - Android: Beim ersten Start nach Benachrichtigungen fragen lassen und die Akku-Optimierung für Fox Queue ausschalten, sonst bremst das System den Monitor im Hintergrund. Solange er läuft, siehst du eine dauerhafte Meldung mit Stop-Knopf.
-- Die APK ist mit `android/app/foxqueue.keystore` signiert, damit Updates sich über die alte Version installieren lassen. Repo am besten privat halten.
+- Die APK ist mit `android/app/foxqueue.keystore` signiert, damit Updates sich über die alte Version installieren lassen. Repo privat halten.
+  Sicherer: den Schlüssel als Secret ablegen. Unter Settings → Secrets and variables → Actions `KEYSTORE_B64` (Inhalt der Datei, base64-kodiert) und `KEYSTORE_PASSWORD` anlegen – der Build nimmt dann das Secret und prüft, dass es derselbe Schlüssel ist. Danach kann die Datei aus dem Repo gelöscht werden (vorher eine Kopie sichern: ohne diesen Schlüssel sind keine Updates mehr möglich).
 - Queue-it-Erkennung: Fox Queue meldet, wenn die Shopseite auf `*.queue-it.net` weiterleitet oder einen Warteschlangen-Link enthält. Für eine Queue-it-URL selbst (wie `xyz.queue-it.net/?c=...`) nimm den Modus „Seite ändert sich“ oder „Text erscheint“.

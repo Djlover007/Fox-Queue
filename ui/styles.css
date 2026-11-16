@@ -184,3 +184,20 @@ body.android .android-only { display: flex !important; }
   .kv { grid-template-columns: 110px 1fr; }
   .desktop-only { display: none !important; }
 }
+
+/* Fensterübersicht */
+.win-list { display: flex; flex-direction: column; gap: 8px; }
+.win { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.win-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 160px; }
+.win-info { color: var(--muted); font-size: 12px; flex: 1 1 140px; }
+.win .row { margin-left: auto; }
+.badge.queue { background: rgba(232, 137, 58, .18); color: var(--accent); }
+.badge.warn { background: rgba(240, 200, 60, .18); color: #f0c83c; }
+.windows-only { display: none; }
+body.windows .windows-only { display: inline-flex; }
+textarea {
+  font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; width: 100%; resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--accent); }
+.target.editing { border-color: var(--accent); }

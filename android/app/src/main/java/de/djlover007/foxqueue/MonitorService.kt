@@ -50,9 +50,11 @@ class MonitorService : Service() {
                         Store.runRound(this)
                         // Alle 6 Stunden nach Updates schauen
                         if (System.currentTimeMillis() - Updater.lastCheck > 6 * 3600_000L) Updater.check(this, notifyIfNew = true)
-                        val jitter = (Math.random() * minOf(10.0, Store.intervalSec * 0.15) * 1000).toLong()
+                        Store.fireDueStarts(this)
+                        val tick = Store.tickSec()
+                        val jitter = (Math.random() * minOf(10.0, tick * 0.15) * 1000).toLong()
                         var waited = 0L
-                        val total = Store.intervalSec * 1000L + jitter
+                        val total = tick * 1000L + jitter
                         while (Store.running && waited < total) { Thread.sleep(500); waited += 500 }
                     }
                 } catch (_: InterruptedException) { }

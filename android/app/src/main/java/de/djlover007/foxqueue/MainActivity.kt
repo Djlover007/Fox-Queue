@@ -60,10 +60,13 @@ class MainActivity : Activity() {
             Updater.ACTION_INSTALL_STATUS -> Updater.handleInstallStatus(this, intent)
             ACTION_FOCUS_TASK -> {
                 // Captcha-Hinweis angetippt: genau dieses Fenster nach vorn holen
-                val id = intent.getIntExtra("taskId", -1)
-                getSystemService(android.app.ActivityManager::class.java).appTasks
-                    .firstOrNull { (if (Build.VERSION.SDK_INT >= 29) it.taskInfo.taskId else @Suppress("DEPRECATION") it.taskInfo.id) == id }
-                    ?.moveToFront()
+                Store.focusWindow(this, intent.getIntExtra("taskId", -1))
+            }
+            ACTION_OPEN_WINDOWS -> {
+                // Startzeit-Meldung angetippt: Alarm aus, Fenster des Ziels öffnen
+                Store.stopAlarm()
+                val id = intent.getStringExtra("targetId")
+                synchronized(Store) { Store.targets.find { it.id == id } }?.let { TaskActivity.open(this, it.url, it.name, it.windows) }
             }
             ACTION_AUTO_OPEN -> {
                 // Von der Vollbild-Benachrichtigung: Bildschirm an, ggf. Entsperren anfordern, Seite öffnen. Alarm läuft weiter.
@@ -115,6 +118,7 @@ class MainActivity : Activity() {
         const val ACTION_OPEN_ALERT = "de.djlover007.foxqueue.OPEN_ALERT"
         const val ACTION_AUTO_OPEN = "de.djlover007.foxqueue.AUTO_OPEN"
         const val ACTION_FOCUS_TASK = "de.djlover007.foxqueue.FOCUS_TASK"
+        const val ACTION_OPEN_WINDOWS = "de.djlover007.foxqueue.OPEN_WINDOWS"
     }
 
     override fun onPause() { Store.foreground = false; super.onPause() }
@@ -132,7 +136,18 @@ class MainActivity : Activity() {
     inner class Bridge {
         private val ctx get() = this@MainActivity
 
-        @JavascriptInterface fun getState(): String = Store.stateJson()
+        @JavascriptInterface fun getState(): String {
+            Store.fireDueStarts(ctx)
+            Store.pruneWindows(ctx)
+            return Store.stateJson()
+        }
+
+        /** Eigenes Intervall, Startzeit und Zahl der Fenster aus dem JSON übernehmen (nur was mitkommt). */
+        private fun applyExtras(t: Store.Target, o: JSONObject) {
+            if (o.has("intervalSec")) t.intervalSec = o.optInt("intervalSec", 0).let { if (it > 0) maxOf(20, it) else 0 }
+            if (o.has("startAt")) t.startAt = maxOf(0L, o.optLong("startAt", 0))
+            if (o.has("windows")) t.windows = o.optInt("windows", 1).coerceIn(1, Store.MAX_WINDOWS)
+        }
 
         @JavascriptInterface fun saveConfig(json: String): String {
             val o = JSONObject(json)
@@ -143,6 +158,10 @@ class MainActivity : Activity() {
                 Store.sound = o.optBoolean("sound", true)
                 Store.vibrate = o.optBoolean("vibrate", true)
                 Store.openBrowser = o.optBoolean("openBrowser", false)
+                Store.captchaNotify = o.optBoolean("captchaNotify", true)
+                Store.captchaSound = o.optBoolean("captchaSound", false)
+                Store.tgToken = o.optString("tgToken", "").trim()
+                Store.tgChat = o.optString("tgChat", "").trim()
                 Store.applyProxy(o.optString("proxy", ""))
             }
             Store.save(ctx); Store.log("info", "Einstellungen gespeichert.")
@@ -154,9 +173,9 @@ class MainActivity : Activity() {
             val o = JSONObject(json)
             val id = java.lang.Long.toString(System.currentTimeMillis(), 36) + (1000..9999).random()
             synchronized(Store) {
-                Store.targets.add(Store.Target(id, o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), true, o.optString("webhook")))
+                Store.targets.add(Store.Target(id, o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), true, o.optString("webhook")).also { applyExtras(it, o) })
             }
-            Store.save(ctx); Store.log("info", "Ziel hinzugefügt: ${o.getString("name")}")
+            Store.save(ctx); Store.scheduleStarts(ctx); Store.log("info", "Ziel hinzugefügt: ${o.getString("name")}")
             return Store.stateJson()
         }
 
@@ -166,15 +185,23 @@ class MainActivity : Activity() {
                 Store.targets.find { it.id == id }?.let {
                     if (o.has("enabled")) { it.enabled = o.getBoolean("enabled"); if (!it.enabled) it.live = false }
                     if (o.has("webhook")) it.webhook = o.optString("webhook")
+                    if (o.optString("name").isNotBlank()) it.name = o.getString("name")
+                    // Adresse, Modus oder Text geändert → Ziel fängt neu an zu beobachten
+                    val before = it.url + "|" + it.mode + "|" + it.keyword
+                    if (o.optString("url").startsWith("http")) it.url = o.getString("url")
+                    if (o.optString("mode") in listOf("queue", "keyword", "gone", "change")) it.mode = o.getString("mode")
+                    if (o.has("keyword")) it.keyword = o.optString("keyword")
+                    if (before != it.url + "|" + it.mode + "|" + it.keyword) { it.live = false; it.hash = null; it.lastError = ""; it.status = "Wartet"; it.lastCheck = 0 }
+                    applyExtras(it, o)
                 }
             }
-            Store.save(ctx)
+            Store.save(ctx); Store.scheduleStarts(ctx)
             return Store.stateJson()
         }
 
         @JavascriptInterface fun removeTarget(id: String): String {
             synchronized(Store) { Store.targets.removeAll { it.id == id } }
-            Store.save(ctx)
+            Store.save(ctx); Store.scheduleStarts(ctx)
             return Store.stateJson()
         }
 
@@ -201,6 +228,27 @@ class MainActivity : Activity() {
             return Store.stateJson()
         }
 
+        @JavascriptInterface fun focusWindow(id: String): String {
+            id.toIntOrNull()?.let { runOnUiThread { Store.focusWindow(ctx, it) } }
+            return Store.stateJson()
+        }
+
+        @JavascriptInterface fun closeWindow(id: String): String {
+            id.toIntOrNull()?.let { Store.closeWindow(ctx, it) }
+            return Store.stateJson()
+        }
+
+        @JavascriptInterface fun closeAllWindows(): String { Store.closeAllWindows(ctx); return Store.stateJson() }
+
+        /** Probe für den Alarm „Du bist dran“. */
+        @JavascriptInterface fun testPassed(): String {
+            Thread {
+                Store.alarm(ctx, Store.Target("test", "Test #1", "https://github.com/Djlover007", "queue", "", true),
+                    "Du bist dran", "So klingt es, wenn ein Fenster die Warteschlange verlässt.", count = false)
+            }.start()
+            return Store.stateJson()
+        }
+
         @JavascriptInterface fun stopAlarm(): String { Store.stopAlarm(); return Store.stateJson() }
 
         @JavascriptInterface fun clearStats(): String { Store.clearStats(ctx); return Store.stateJson() }
@@ -218,7 +266,7 @@ class MainActivity : Activity() {
 
         /** Öffnet die Seite in [count] eigenen Fenstern/Tasks (siehe TaskActivity). */
         @JavascriptInterface fun openTask(url: String, name: String, count: String): String {
-            val n = (count.toIntOrNull() ?: 1).coerceIn(1, TaskActivity.MAX_WINDOWS)
+            val n = (count.toIntOrNull() ?: 1).coerceIn(1, Store.MAX_WINDOWS)
             if (url.startsWith("http")) runOnUiThread { TaskActivity.open(ctx, url, name, n) }
             if (n > 1) Store.log("info", "$n Fenster geöffnet: $name")
             return Store.stateJson()

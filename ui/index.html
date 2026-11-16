@@ -65,6 +65,17 @@
         <div class="tile"><div class="tile-label">Prüfungen</div><div class="tile-value" id="tChecks">0</div><div class="tile-foot" id="tInterval">alle 60 s</div></div>
       </div>
 
+      <div class="card hidden" id="winCard">
+        <div class="card-head">
+          <h2>Fenster <span class="nav-count" id="winCount">0</span></h2>
+          <div class="row">
+            <button class="btn small windows-only" id="winArrange">Als Raster anordnen</button>
+            <button class="btn small danger" id="winCloseAll">Alle schließen</button>
+          </div>
+        </div>
+        <div class="win-list" id="winList"></div>
+      </div>
+
       <div class="grid2">
         <div class="card">
           <div class="card-head"><h2>Live-Feed</h2><button class="btn small" id="clearLog">Leeren</button></div>
@@ -84,7 +95,7 @@
       <p class="sub">Seiten, die überwacht werden. Alarm gibt es, sobald sich der Zustand ändert.</p>
 
       <div class="card">
-        <div class="card-head"><h2>Neues Ziel</h2></div>
+        <div class="card-head"><h2 id="formTitle">Neues Ziel</h2></div>
         <div class="form">
           <label>Name<input id="fName" placeholder="z. B. Pokémon Drop" /></label>
           <label>URL<input id="fUrl" placeholder="https://shop.example.de/produkt" inputmode="url" /></label>
@@ -98,7 +109,13 @@
           </label>
           <label id="fKeywordWrap" class="hidden">Text<input id="fKeyword" placeholder="In den Warenkorb" /></label>
           <label>Eigener Discord-Webhook (optional, sonst der aus den Einstellungen)<input id="fWebhook" placeholder="https://discord.com/api/webhooks/..." /></label>
-          <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
+          <label>Eigenes Prüfintervall in Sekunden (optional, mind. 20 – leer = Standard aus den Einstellungen)<input id="fInterval" type="number" min="20" step="5" placeholder="Standard" /></label>
+          <label>Startzeit (optional) – dann startet der Monitor von selbst und öffnet die Fenster<input id="fStart" type="datetime-local" /></label>
+          <label>Eigene Fenster (1–20), die „Eigene Fenster öffnen“ und die Startzeit aufmachen<input id="fWindows" type="number" min="1" max="20" value="1" /></label>
+          <div class="row">
+            <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
+            <button class="btn hidden" id="cancelEdit">Abbrechen</button>
+          </div>
         </div>
       </div>
 
@@ -150,13 +167,29 @@
           <label class="check"><input type="checkbox" id="sNotify" /> Benachrichtigung auf dem Gerät</label>
           <label class="check"><input type="checkbox" id="sSound" /> Lauter Ton-Alarm, bis du reagierst (max. 2 Min.)</label>
           <label class="check android-only"><input type="checkbox" id="sVibrate" /> Vibration beim Alarm</label>
+          <label class="check"><input type="checkbox" id="sCaptcha" /> Hinweis, wenn in einem eigenen Fenster ein Captcha auftaucht</label>
+          <label class="check"><input type="checkbox" id="sCaptchaSound" /> … dabei auch der laute Ton-Alarm</label>
+          <label>Telegram Bot-Token (optional) – von @BotFather<input id="sTgToken" placeholder="123456789:ABC…" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
+          <label>Telegram Chat-ID (optional) – deine Nummer, z. B. von @userinfobot<input id="sTgChat" placeholder="123456789" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
           <label>Proxy (optional) – host:port:nutzer:passwort oder http://nutzer:passwort@host:port<input id="sProxy" placeholder="leer = direkte Verbindung" autocapitalize="off" autocorrect="off" spellcheck="false" /></label>
           <label class="check"><input type="checkbox" id="sOpen" /> Seite bei Alarm automatisch im Browser öffnen</label>
           <div class="row">
             <button class="btn primary" id="saveSettings">Speichern</button>
             <button class="btn" id="testAlert">Test-Alarm senden</button>
+            <button class="btn" id="testPassed">Test: „Du bist dran“</button>
           </div>
         </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Ziele übertragen</h2></div>
+        <p class="muted small-text">Zum Mitnehmen aufs andere Gerät: <b>Exportieren</b> schreibt alle Ziele als Text ins Feld. Kopiere ihn, füge ihn auf dem anderen Gerät hier ein und tippe <b>Importieren</b>. Eigene Discord-Webhooks stehen mit im Text – gib ihn nicht weiter.</p>
+        <textarea id="xferText" rows="4" placeholder="Hier steht nach dem Exportieren der Text – oder füge den Text vom anderen Gerät ein." autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="xferExport">Exportieren</button>
+          <button class="btn" id="xferCopy">Kopieren</button>
+          <button class="btn primary" id="xferImport">Importieren</button>
+        </div>
+        <p class="muted small-text" id="xferMsg"></p>
       </div>
       <div class="card">
         <div class="card-head"><h2>Updates</h2></div>

@@ -37,6 +37,9 @@ object Store {
     data class Target(
         val id: String, var name: String, var url: String, var mode: String, var keyword: String, var enabled: Boolean,
         var webhook: String = "",
+        var intervalSec: Int = 0,   // eigenes Prüfintervall, 0 = Standard aus den Einstellungen
+        var startAt: Long = 0,      // Startzeit (ms), 0 = keine
+        var windows: Int = 1,       // so viele eigene Fenster öffnet „Eigene Fenster öffnen“ / die Startzeit
         var status: String = "Wartet", var live: Boolean = false, var lastCheck: Long = 0, var lastError: String = "", var hash: String? = null,
     )
 
@@ -47,6 +50,11 @@ object Store {
     var sound = true
     var vibrate = true
     var openBrowser = false
+    var captchaNotify = true    // Hinweis, wenn in einem eigenen Fenster ein Captcha auftaucht
+    var captchaSound = false    // … zusätzlich mit lautem Alarmton
+    var tgToken = ""            // Telegram: Bot-Token
+    var tgChat = ""             // Telegram: Chat-ID
+    const val MAX_WINDOWS = 20
     @Volatile var foreground = false   // App gerade sichtbar?
     var proxy = ""   // optionaler einzelner Proxy: http://[nutzer:pass@]host:port
     @Volatile private var client: OkHttpClient = OkHttpClient()
@@ -75,23 +83,31 @@ object Store {
         sound = p.getBoolean("sound", true)
         vibrate = p.getBoolean("vibrate", true)
         openBrowser = p.getBoolean("openBrowser", false)
+        captchaNotify = p.getBoolean("captchaNotify", true)
+        captchaSound = p.getBoolean("captchaSound", false)
+        tgToken = p.getString("tgToken", "") ?: ""
+        tgChat = p.getString("tgChat", "") ?: ""
         applyProxy(p.getString("proxy", "") ?: "")
         val ev = JSONArray(p.getString("events", "[]"))
         for (i in 0 until ev.length()) events.add(ev.getJSONObject(i))
         val arr = JSONArray(p.getString("targets", "[]"))
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
-            targets.add(Target(o.getString("id"), o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), o.optBoolean("enabled", true), o.optString("webhook")))
+            targets.add(Target(o.getString("id"), o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), o.optBoolean("enabled", true), o.optString("webhook"),
+                o.optInt("intervalSec", 0), o.optLong("startAt", 0), o.optInt("windows", 1).coerceIn(1, MAX_WINDOWS)))
         }
+        scheduleStarts(ctx)
     }
 
     @Synchronized fun save(ctx: Context) {
         val arr = JSONArray()
         targets.forEach {
-            arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook))
+            arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook)
+                .put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("windows", it.windows))
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
             .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putBoolean("openBrowser", openBrowser).putString("proxy", proxy)
+            .putBoolean("captchaNotify", captchaNotify).putBoolean("captchaSound", captchaSound).putString("tgToken", tgToken).putString("tgChat", tgChat)
             .putString("targets", arr.toString()).putString("events", JSONArray(events).toString()).apply()
     }
 
@@ -108,11 +124,16 @@ object Store {
         val ts = JSONArray()
         targets.forEach {
             ts.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword)
-                .put("enabled", it.enabled).put("webhook", it.webhook).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
+                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("windows", it.windows).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
+        }
+        val ws = JSONArray()
+        windows.values.sortedBy { it.id }.forEach {
+            ws.put(JSONObject().put("id", it.id).put("title", it.title).put("url", it.url).put("status", it.status).put("pos", it.pos).put("wait", it.wait))
         }
         return JSONObject()
-            .put("running", running).put("platform", "android")
-            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", openBrowser).put("sound", sound).put("vibrate", vibrate).put("proxy", proxy))
+            .put("running", running).put("platform", "android").put("windows", ws)
+            .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", openBrowser).put("sound", sound).put("vibrate", vibrate).put("proxy", proxy)
+                .put("captchaNotify", captchaNotify).put("captchaSound", captchaSound).put("tgToken", tgToken).put("tgChat", tgChat))
             .put("events", JSONArray(events))
             .put("ringing", ringing ?: JSONObject.NULL)
             .put("targets", ts)
@@ -125,7 +146,7 @@ object Store {
 
     @Synchronized fun resetRun() {
         alerts = 0; errors = 0; checks = 0
-        targets.forEach { it.live = false; it.hash = null; it.lastError = "" }
+        targets.forEach { it.live = false; it.hash = null; it.lastError = ""; it.lastCheck = 0 }
     }
 
     // ---------- Proxy ----------
@@ -161,6 +182,12 @@ object Store {
     }
 
     // ---------- Abruf ----------
+    /** Wie oft ein Ziel geprüft wird: eigenes Intervall, sonst das aus den Einstellungen (mind. 20 s). */
+    fun effInterval(t: Target) = maxOf(20, if (t.intervalSec > 0) t.intervalSec else intervalSec)
+
+    /** Takt des Monitors = kürzestes Intervall aller aktiven Ziele. */
+    @Synchronized fun tickSec(): Int = targets.filter { it.enabled }.minOfOrNull { effInterval(it) }?.let { minOf(it, intervalSec) } ?: intervalSec
+
     private fun isQueueIt(u: String) = try { URL(u).host.lowercase().let { it == "queue-it.net" || it.endsWith(".queue-it.net") } } catch (e: Exception) { false }
 
     private fun pageText(html: String) = html
@@ -238,7 +265,9 @@ object Store {
 
     /** Bis zu 4 Ziele gleichzeitig prüfen – jedes Ziel trotzdem nur einmal pro Intervall. */
     fun runRound(ctx: Context) {
-        val list = synchronized(this) { targets.filter { it.enabled } }
+        // Nur Ziele, deren (eigenes) Intervall abgelaufen ist
+        val now = System.currentTimeMillis()
+        val list = synchronized(this) { targets.filter { it.enabled && now - it.lastCheck >= effInterval(it) * 1000L - 1500 } }
         if (list.isEmpty()) return
         val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(PARALLEL, list.size))
         try {
@@ -349,8 +378,7 @@ object Store {
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(alertId++, n)
         }
-        val hook = t.webhook.ifBlank { webhook }
-        if (hook.isNotBlank()) sendDiscord(hook, title, t.name, body, t.url)
+        remote(t.webhook.ifBlank { webhook }, title, t.name, body, t.url)
     }
 
     /** Store bereit machen, falls ein Fenster nach einem Neustart des Prozesses zuerst aufgeht. */
@@ -359,7 +387,9 @@ object Store {
     // ---------- Captcha-Hinweis aus einem eigenen Fenster ----------
     /** Meldet ein Captcha: Benachrichtigung (antippen holt genau dieses Fenster nach vorn) + Discord. */
     fun captchaFound(ctx: Context, name: String, url: String, taskId: Int) {
+        if (!captchaNotify) return
         log("alert", "🧩 Captcha wartet: $name")
+        if (captchaSound) { startAlarm(ctx, Target("task$taskId", name, url, "queue", "", true), "Captcha wartet"); ringingTask = taskId }
         val focus = PendingIntent.getActivity(
             ctx, 70_000 + taskId,
             Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_FOCUS_TASK).putExtra("taskId", taskId)
@@ -375,8 +405,8 @@ object Store {
             .setCategory(Notification.CATEGORY_REMINDER)
             .build()
         ctx.getSystemService(NotificationManager::class.java).notify(80_000 + taskId, n)
-        val hook = synchronized(this) { targets.find { it.url == url }?.webhook }.orEmpty().ifBlank { webhook }
-        if (hook.isNotBlank()) Thread { sendDiscord(hook, "Captcha wartet", name, "In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.", url) }.start()
+        val hook = hookFor(url)
+        Thread { remote(hook, "Captcha wartet", name, "In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.", url) }.start()
     }
 
     // ---------- „Du bist dran“: Warteschlange in einem eigenen Fenster durch ----------
@@ -425,8 +455,8 @@ object Store {
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(90_000 + taskId, n)
         }
-        val hook = synchronized(this) { targets.find { it.url == url }?.webhook }.orEmpty().ifBlank { webhook }
-        if (hook.isNotBlank()) Thread { sendDiscord(hook, "Du bist dran", name, "Die Warteschlange ist durch – du bist im Shop.", url) }.start()
+        val hook = hookFor(url)
+        Thread { remote(hook, "Du bist dran", name, "Die Warteschlange ist durch – du bist im Shop.", url) }.start()
     }
 
     /** Hinweis entfernen, sobald das Captcha weg ist. */
@@ -495,6 +525,154 @@ object Store {
         }
     }
 
+    private fun hookFor(url: String): String = synchronized(this) { targets.find { it.url == url }?.webhook }.orEmpty().ifBlank { webhook }
+
+    /** Alarm an alle eingerichteten Fern-Kanäle: Discord (falls Webhook) und Telegram (falls eingerichtet). Nicht im UI-Thread aufrufen. */
+    private fun remote(hook: String, title: String, name: String, body: String, url: String) {
+        if (hook.isNotBlank()) sendDiscord(hook, title, name, body, url)
+        sendTelegram(title, name, body, url)
+    }
+
+    private fun sendTelegram(title: String, name: String, body: String, url: String) {
+        val token = tgToken; val chat = tgChat
+        if (token.isBlank() || chat.isBlank()) return
+        try {
+            val payload = JSONObject().put("chat_id", chat).put("text", "🦊 $title\n$name\n$body\n$url").put("disable_web_page_preview", true)
+            val c = (URL("https://api.telegram.org/bot$token/sendMessage").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"; doOutput = true
+                connectTimeout = 10000; readTimeout = 10000
+                setRequestProperty("Content-Type", "application/json")
+            }
+            c.outputStream.use { it.write(payload.toString().toByteArray()) }
+            val code = c.responseCode
+            c.disconnect()
+            if (code >= 300) log("error", "Telegram: HTTP $code" + (if (code == 401) " (Bot-Token prüfen)" else if (code == 400) " (Chat-ID prüfen)" else ""))
+        } catch (e: Exception) {
+            log("error", "Telegram: ${e.message}")
+        }
+    }
+
+    // ---------- Eigene Fenster: Übersicht fürs Dashboard ----------
+    class Win(val id: Int, @Volatile var title: String, @Volatile var url: String, @Volatile var status: String = "loading", @Volatile var pos: String = "", @Volatile var wait: String = "")
+    val windows = java.util.concurrent.ConcurrentHashMap<Int, Win>()
+
+    fun reportWindow(id: Int, title: String, url: String, status: String, pos: String, wait: String) {
+        val w = windows.getOrPut(id) { Win(id, title, url) }
+        w.title = title; w.url = url; w.status = status; w.pos = pos; w.wait = wait
+    }
+
+    private fun taskIdOf(t: android.app.ActivityManager.AppTask): Int = try {
+        if (android.os.Build.VERSION.SDK_INT >= 29) t.taskInfo.taskId else @Suppress("DEPRECATION") t.taskInfo.id
+    } catch (_: Exception) { -1 }
+
+    private fun appTask(ctx: Context, id: Int) =
+        ctx.getSystemService(android.app.ActivityManager::class.java).appTasks.firstOrNull { taskIdOf(it) == id }
+
+    /** Einträge entfernen, deren Fenster es nicht mehr gibt (z. B. in der Übersicht weggewischt). */
+    fun pruneWindows(ctx: Context) {
+        if (windows.isEmpty()) return
+        val alive = try { ctx.getSystemService(android.app.ActivityManager::class.java).appTasks.map { taskIdOf(it) }.toSet() } catch (_: Exception) { return }
+        windows.keys.filter { it !in alive }.forEach { windows.remove(it) }
+    }
+
+    fun focusWindow(ctx: Context, id: Int) { try { appTask(ctx, id)?.moveToFront() } catch (_: Exception) { } }
+
+    fun closeWindow(ctx: Context, id: Int) {
+        try { appTask(ctx, id)?.finishAndRemoveTask() } catch (_: Exception) { }
+        windows.remove(id)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.cancel(80_000 + id); nm.cancel(90_000 + id); nm.cancel(95_000 + id)
+        if (ringingTask == id) stopAlarm()
+    }
+
+    fun closeAllWindows(ctx: Context) { windows.keys.toList().forEach { closeWindow(ctx, it) } }
+
+    /** Android hat ein Fenster im Hintergrund beendet: merken und melden. Beim Öffnen lädt es sich neu. */
+    fun windowKilled(ctx: Context, id: Int, title: String) {
+        windows[id]?.let { it.status = "killed"; it.pos = ""; it.wait = "" }
+        log("error", "Android hat ein Fenster angehalten: $title – beim Öffnen lädt es neu")
+        if (!notify) return
+        val focus = PendingIntent.getActivity(
+            ctx, 95_000 + id,
+            Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_FOCUS_TASK).putExtra("taskId", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = Notification.Builder(ctx, CH_CAPTCHA)
+            .setSmallIcon(R.drawable.ic_stat_fox)
+            .setContentTitle("⚠️ Fenster angehalten: $title")
+            .setContentText("Android hat es geschlossen – antippen lädt es neu")
+            .setContentIntent(focus).setAutoCancel(true)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(95_000 + id, n)
+    }
+
+    // ---------- Startzeit pro Ziel ----------
+    /** Stellt den Wecker auf die nächste Startzeit (oder löscht ihn). */
+    fun scheduleStarts(ctx: Context) {
+        try {
+            val am = ctx.getSystemService(android.app.AlarmManager::class.java)
+            val pi = PendingIntent.getBroadcast(
+                ctx, 9, Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_START_AT),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            am.cancel(pi)
+            val next = synchronized(this) { targets.filter { it.startAt > 0 }.minOfOrNull { it.startAt } } ?: return
+            try {
+                if (android.os.Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, next, pi)
+                else am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, next, pi)
+            } catch (_: SecurityException) {
+                am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, next, pi)
+            }
+        } catch (e: Exception) {
+            log("error", "Startzeit: ${e.message}")
+        }
+    }
+
+    /** Fällige Startzeiten ausführen: Monitor starten, Fenster öffnen (oder melden, wenn die App nicht offen ist). */
+    fun fireDueStarts(ctx: Context) {
+        val now = System.currentTimeMillis()
+        // Fällige Ziele in einem Zug übernehmen, damit keine Startzeit doppelt auslöst
+        val due = synchronized(this) {
+            targets.filter { it.startAt > 0 && it.startAt <= now }.map { t -> Pair(t, now - t.startAt).also { t.startAt = 0 } }
+        }
+        if (due.isEmpty()) return
+        for ((t, late) in due) {
+            if (late > 10 * 60_000L) { log("error", "Startzeit verpasst: ${t.name}"); continue }
+            log("alert", "⏰ Startzeit erreicht: ${t.name}")
+            synchronized(this) { t.enabled = true }
+            if (!running) try {
+                ctx.startForegroundService(Intent(ctx, MonitorService::class.java))
+                running = true
+            } catch (e: Exception) { log("error", "Monitor konnte nicht starten: ${e.message}") }
+            if (foreground) {
+                // App ist offen: Fenster direkt öffnen
+                main.post { try { TaskActivity.open(ctx, t.url, t.name, t.windows) } catch (_: Exception) { } }
+            } else {
+                // Aus dem Hintergrund darf Android keine Fenster öffnen → Alarm, Antippen öffnet sie
+                if (sound) startAlarm(ctx, t, "Startzeit erreicht")
+                val open = PendingIntent.getActivity(
+                    ctx, 60_000 + (t.id.hashCode() and 0xfff),
+                    Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_OPEN_WINDOWS).putExtra("targetId", t.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                val silence = PendingIntent.getBroadcast(
+                    ctx, 5, Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_STOP_ALARM),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                val n = Notification.Builder(ctx, CH_ALERT)
+                    .setSmallIcon(R.drawable.ic_stat_fox)
+                    .setContentTitle("⏰ Startzeit: ${t.name}")
+                    .setContentText("Monitor läuft – antippen öffnet ${t.windows} Fenster")
+                    .setContentIntent(open).setDeleteIntent(silence).setAutoCancel(true)
+                    .setCategory(Notification.CATEGORY_ALARM)
+                    .build()
+                ctx.getSystemService(NotificationManager::class.java).notify(alertId++, n)
+            }
+        }
+        save(ctx)
+        scheduleStarts(ctx)
+    }
+
     private fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.deleteNotificationChannel("fox_alert")
@@ -502,8 +680,8 @@ object Store {
             description = "Wenn eine Warteschlange aufgeht oder ein Drop live ist"
             enableVibration(false)
         })
-        nm.createNotificationChannel(NotificationChannel(CH_CAPTCHA, "Captcha", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Wenn in einem Fox-Queue-Fenster ein Captcha auftaucht, das du lösen musst"
+        nm.createNotificationChannel(NotificationChannel(CH_CAPTCHA, "Fenster-Hinweise", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Wenn in einem Fox-Queue-Fenster ein Captcha auftaucht oder Android ein Fenster anhält"
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 300, 150, 300, 150, 300)
         })

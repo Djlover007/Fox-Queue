@@ -19,7 +19,8 @@ android {
     // Fester Schlüssel, damit Updates über die alte Version installiert werden können
     signingConfigs {
         create("fox") {
-            // GitHub Actions: Schlüssel aus den Secrets (KEYSTORE_FILE/KEYSTORE_PASSWORD), sonst die Datei im Ordner
+            // GitHub Actions: Schlüssel aus den Secrets (KEYSTORE_FILE/KEYSTORE_PASSWORD).
+            // Lokal: eigene Kopie als android/app/foxqueue.keystore ablegen (wird nicht ins Repo übernommen).
             val pass = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "foxqueue"
             storeFile = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }?.let { file(it) } ?: file("foxqueue.keystore")
             storePassword = pass

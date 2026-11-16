@@ -40,18 +40,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.9'
-      # Signierschlüssel aus den Secrets (KEYSTORE_B64 + KEYSTORE_PASSWORD), sobald sie angelegt sind.
-      # Bis dahin wird die Datei android/app/foxqueue.keystore aus dem Repo benutzt.
+      # Der Signierschlüssel liegt nicht im Repo, sondern in den Secrets KEYSTORE_B64 + KEYSTORE_PASSWORD.
       - name: Signierschlüssel aus Secret
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/fox.keystore"
-            # Muss derselbe Schlüssel sein wie bisher, sonst lassen sich Updates nicht installieren
-            echo "11f4a66b75e6ee4e48aa10eb467ce3f302695bf40b8ab726002e41f9330f4c19  $RUNNER_TEMP/fox.keystore" | sha256sum -c -
-            echo "KEYSTORE_FILE=$RUNNER_TEMP/fox.keystore" >> "$GITHUB_ENV"
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Secrets KEYSTORE_B64 und KEYSTORE_PASSWORD fehlen – siehe README, Abschnitt Hinweise."
+            exit 1
           fi
+          echo "$KEYSTORE_B64" | tr -d ' \n\r' | base64 -d > "$RUNNER_TEMP/fox.keystore"
+          # Muss derselbe Schlüssel sein wie bisher, sonst lassen sich Updates nicht installieren
+          echo "11f4a66b75e6ee4e48aa10eb467ce3f302695bf40b8ab726002e41f9330f4c19  $RUNNER_TEMP/fox.keystore" | sha256sum -c -
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/fox.keystore" >> "$GITHUB_ENV"
       - name: APK bauen
         working-directory: android
         env:

@@ -11,7 +11,7 @@
     <div class="brand">
       <div class="logo">🦊</div>
       <div>
-        <div class="brand-name">FOX-QUEUE</div>
+        <div class="brand-name">Fox Queue</div>
         <div class="brand-version" id="brandVersion">Version –</div>
       </div>
     </div>
@@ -46,7 +46,7 @@
       </div>
     </div>
 
-    <div class="drop-bar hidden" id="dropBar"><span id="dropText"></span><span class="muted" id="dropSub"></span></div>
+    <div class="drop-bar hidden" id="dropBar"><span id="dropText"></span><span id="dropClock"></span><span id="dropSub"></span></div>
 
     <div class="update-bar hidden" id="updateBar">
       <span id="updateText">Update verfügbar</span>
@@ -61,7 +61,7 @@
 
       <div class="tiles">
         <div class="tile"><div class="tile-label">Ziele</div><div class="tile-value" id="tTargets">0</div><div class="tile-foot" id="tTargetsFoot">0 aktiv</div></div>
-        <div class="tile"><div class="tile-label">Queue offen</div><div class="tile-value accent" id="tOpen">0</div><div class="tile-foot">gerade live</div></div>
+        <div class="tile"><div class="tile-label">Offen</div><div class="tile-value accent" id="tOpen">0</div><div class="tile-foot">gerade live</div></div>
         <div class="tile"><div class="tile-label">Alarme</div><div class="tile-value green" id="tAlerts">0</div><div class="tile-foot">seit Start</div></div>
         <div class="tile"><div class="tile-label">Fehler</div><div class="tile-value red" id="tErrors">0</div><div class="tile-foot">Abrufe fehlgeschlagen</div></div>
         <div class="tile"><div class="tile-label">Prüfungen</div><div class="tile-value" id="tChecks">0</div><div class="tile-foot" id="tInterval">alle 60 s</div></div>
@@ -114,7 +114,7 @@
           <label>Eigenes Prüfintervall in Sekunden (optional, mind. 20 – leer = Standard aus den Einstellungen)<input id="fInterval" type="number" min="20" step="5" placeholder="Standard" /></label>
           <label>Drop-Zeit (optional) – wann es losgeht<input id="fStart" type="datetime-local" /></label>
           <label>Vorlauf in Minuten – so viel früher weckt dich Fox Queue, startet den Monitor und öffnet die Fenster<input id="fLead" type="number" min="0" max="120" value="5" /></label>
-          <label>Eigene Fenster (1–20), die „Eigene Fenster öffnen“ und die Startzeit aufmachen<input id="fWindows" type="number" min="1" max="20" value="1" /></label>
+          <label>Eigene Fenster (1–20), die „Eigene Fenster öffnen“ und der Vorlauf zur Drop-Zeit aufmachen<input id="fWindows" type="number" min="1" max="20" value="1" /></label>
           <div class="row">
             <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
             <button class="btn hidden" id="cancelEdit">Abbrechen</button>

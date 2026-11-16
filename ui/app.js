@@ -249,7 +249,8 @@ function renderDrop() {
   if (!next) return;
   const at = dropTime(next), live = at <= now;
   $('dropBar').classList.toggle('now', live);
-  $('dropText').textContent = live ? `🔥 ${next.name}: Drop läuft seit ${countdown(now - at)}` : `⏰ ${next.name}: Drop in ${countdown(at - now)}`;
+  $('dropText').textContent = live ? `🔥 ${next.name} – Drop läuft seit` : `⏰ ${next.name} – Drop in`;
+  $('dropClock').textContent = countdown(live ? now - at : at - now);
   $('dropSub').textContent = live ? '' : fmtDateTime(at) + ' Uhr'
     + (next.startAt > now ? ` · Fox Queue startet in ${countdown(next.startAt - now)}` : next.dropAt ? ' · Monitor und Fenster sind gestartet' : '');
 }

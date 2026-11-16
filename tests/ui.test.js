@@ -106,7 +106,8 @@ test('Drop-Zeit: Vorlauf, Countdown und Eintragen aus der Statistik', async () =
     assert.match($('targetList').innerHTML, /⏰ Drop/);
     assert.match($('targetList').innerHTML, /Start 10 Min\. vorher/);
     assert.equal($('dropBar').classList.contains('hidden'), false);
-    assert.match($('dropText').textContent, /Pokémon Drop: Drop in 0[12]:\d\d:\d\d/);
+    assert.match($('dropText').textContent, /Pokémon Drop – Drop in/);
+    assert.match($('dropClock').textContent, /^0[12]:\d\d:\d\d$/);
     assert.match($('dropSub').textContent, /Fox Queue startet in 01:\d\d:\d\d/);
 
     // Bearbeiten zeigt Drop-Zeit und Vorlauf wieder an

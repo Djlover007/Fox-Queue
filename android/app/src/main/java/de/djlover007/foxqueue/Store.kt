@@ -42,7 +42,28 @@ object Store {
         var dropAt: Long = 0,       // Drop-Zeit (ms) für Anzeige und Countdown; startAt liegt um den Vorlauf davor
         var windows: Int = 1,       // so viele eigene Fenster öffnet „Eigene Fenster öffnen“ / die Startzeit
         var status: String = "Wartet", var live: Boolean = false, var lastCheck: Long = 0, var lastError: String = "", var hash: String? = null,
+        var backoff: Int = 0,       // wie oft in Folge „HTTP 429“ kam
+        var pauseUntil: Long = 0,   // bis dahin wird das Ziel nicht geprüft (Shop bremst)
     )
+
+    /** Abruf mit Fehlercode beantwortet; retryAfter = vom Shop genannte Wartezeit in Sekunden (0 = keine). */
+    private class HttpError(val code: Int, val retryAfter: Long, msg: String) : Exception(msg)
+
+    /** Pause nach HTTP 429: 5, 10, 20, 40, höchstens 60 Minuten; nennt der Shop eine längere Wartezeit, gilt die (höchstens 2 Stunden). */
+    private fun backoffMs(level: Int, retryAfterSec: Long): Long {
+        val own = minOf(60L, 5L shl (maxOf(1, level) - 1).coerceAtMost(6)) * 60_000L
+        val asked = retryAfterSec.coerceIn(0L, 7200L) * 1000L
+        return maxOf(own, asked)
+    }
+
+    private fun retryAfterSec(v: String?): Long {
+        if (v.isNullOrBlank()) return 0L
+        v.trim().toLongOrNull()?.let { return it }
+        return try {
+            val t = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US).parse(v.trim())?.time ?: return 0L
+            maxOf(0L, (t - System.currentTimeMillis()) / 1000)
+        } catch (_: Exception) { 0L }
+    }
 
     @Volatile var running = false
     var intervalSec = 60
@@ -127,7 +148,7 @@ object Store {
         val ts = JSONArray()
         targets.forEach {
             ts.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword)
-                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
+                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError).put("pauseUntil", it.pauseUntil))
         }
         val ws = JSONArray()
         windows.values.sortedBy { it.id }.forEach {
@@ -236,8 +257,8 @@ object Store {
             if (code == 407) throw Exception("Proxy hat die Verbindung abgelehnt (Benutzer/Passwort prüfen)")
             val redirected = isQueueIt(finalUrl) && !isQueueIt(t.url)
             if (code >= 400 && !redirected) {
-                val hint = if (code == 403 || code == 429) " – Seite blockiert automatische Abrufe, Intervall erhöhen" else ""
-                throw Exception("HTTP $code$hint")
+                val hint = if (code == 429) " – Shop bremst automatische Abrufe" else if (code == 403) " – Seite blockiert automatische Abrufe" else ""
+                throw HttpError(code, retryAfterSec(resp.header("Retry-After")), "HTTP $code$hint")
             }
             val bytes = resp.body?.bytes() ?: ByteArray(0)
             html = String(bytes, 0, minOf(bytes.size, 3_000_000), Charsets.UTF_8)
@@ -270,7 +291,7 @@ object Store {
     fun runRound(ctx: Context) {
         // Nur Ziele, deren (eigenes) Intervall abgelaufen ist
         val now = System.currentTimeMillis()
-        val list = synchronized(this) { targets.filter { it.enabled && now - it.lastCheck >= effInterval(it) * 1000L - 1500 } }
+        val list = synchronized(this) { targets.filter { it.enabled && it.pauseUntil <= now && now - it.lastCheck >= effInterval(it) * 1000L - 1500 } }
         if (list.isEmpty()) return
         val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(PARALLEL, list.size))
         try {
@@ -297,7 +318,7 @@ object Store {
                     checks++
                     t.lastCheck = System.currentTimeMillis()
                     if (t.lastError.isNotEmpty()) log("info", "${t.name}: wieder erreichbar")
-                    t.lastError = ""
+                    t.lastError = ""; t.backoff = 0; t.pauseUntil = 0
                     t.status = r.status
                 }
                 if (t.mode == "change") {
@@ -314,8 +335,15 @@ object Store {
                     } else if (!r.live && was) log("info", "${t.name}: ${r.status}")
                 }
             } catch (e: Exception) {
-                val msg = if (e is java.net.SocketTimeoutException) "Zeitüberschreitung" else (e.message ?: e.javaClass.simpleName)
+                var msg = if (e is java.net.SocketTimeoutException) "Zeitüberschreitung" else (e.message ?: e.javaClass.simpleName)
                 synchronized(this) {
+                    if (e is HttpError && e.code == 429) {
+                        // Shop bremst: Ziel pausieren, bei jeder weiteren 429 doppelt so lang
+                        t.backoff++
+                        t.pauseUntil = System.currentTimeMillis() + backoffMs(t.backoff, e.retryAfter)
+                        msg += ". Pause bis " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t.pauseUntil)) + " Uhr" +
+                            (if (t.backoff >= 3) " – am besten das Prüfintervall für dieses Ziel erhöhen" else "")
+                    }
                     errors++
                     t.lastCheck = System.currentTimeMillis()
                     if (t.lastError != msg) log("error", "${t.name}: $msg")

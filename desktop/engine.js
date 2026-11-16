@@ -40,6 +40,8 @@ function friendlyError(e) {
   return msg || 'Abruf fehlgeschlagen';
 }
 
+const { retryAfterSec } = require('./queue');
+
 function isQueueItUrl(u) {
   try { return /(^|\.)queue-it\.net$/i.test(new URL(u).hostname); } catch { return false; }
 }
@@ -64,8 +66,11 @@ async function checkTarget(t) {
 
   const redirectedToQueue = isQueueItUrl(res.url) && !isQueueItUrl(t.url);
   if (!res.ok && !redirectedToQueue) {
-    const hint = res.status === 403 || res.status === 429 ? ' – Seite blockiert automatische Abrufe, Intervall erhöhen' : '';
-    throw new Error(`HTTP ${res.status}${hint}`);
+    const hint = res.status === 429 ? ' – Shop bremst automatische Abrufe' : res.status === 403 ? ' – Seite blockiert automatische Abrufe' : '';
+    const err = new Error(`HTTP ${res.status}${hint}`);
+    err.status = res.status;
+    err.retryAfter = retryAfterSec(res.headers.get('retry-after'));
+    throw err;
   }
 
   const text = pageText(html);

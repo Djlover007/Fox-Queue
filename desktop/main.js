@@ -3,7 +3,7 @@ const { app, BrowserWindow, ipcMain, Notification, shell, Menu, screen } = requi
 const path = require('path');
 const fs = require('fs');
 const { checkTarget, setProxy } = require('./engine');
-const { isQueueHost, effInterval } = require('./queue');
+const { isQueueHost, effInterval, backoffMs } = require('./queue');
 
 // ---- Auto-Update ----
 const RELEASES_API = 'https://api.github.com/repos/Djlover007/Fox-Queue-Downloads/releases/latest';
@@ -195,7 +195,7 @@ const PARALLEL = 4;
 async function runRound() {
   // Nur Ziele, deren (eigenes) Intervall abgelaufen ist
   const now = Date.now();
-  const list = state.targets.filter(t => t.enabled && now - (t.lastCheck || 0) >= effInterval(t, state.config.intervalSec) * 1000 - 1500);
+  const list = state.targets.filter(t => t.enabled && !(t.pauseUntil > now) && now - (t.lastCheck || 0) >= effInterval(t, state.config.intervalSec) * 1000 - 1500);
   let next = 0;
   const worker = async () => {
     while (state.running && next < list.length) {
@@ -213,7 +213,7 @@ async function checkOne(t) {
       state.stats.checks++;
       t.lastCheck = Date.now();
       if (t.lastError) log('info', `${t.name}: wieder erreichbar`);
-      t.lastError = '';
+      t.lastError = ''; t.backoff = 0; t.pauseUntil = 0;
       t.status = r.status;
 
       if (t.mode === 'change') {
@@ -235,7 +235,13 @@ async function checkOne(t) {
     } catch (e) {
       state.stats.errors++;
       t.lastCheck = Date.now();
-      const msg = e.name === 'AbortError' ? 'Zeitüberschreitung' : e.message;
+      let msg = e.name === 'AbortError' ? 'Zeitüberschreitung' : e.message;
+      if (e.status === 429) {
+        // Shop bremst: Ziel pausieren, bei jeder weiteren 429 doppelt so lang
+        t.backoff = (t.backoff || 0) + 1;
+        t.pauseUntil = Date.now() + backoffMs(t.backoff, e.retryAfter);
+        msg += `. Pause bis ${new Date(t.pauseUntil).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr` + (t.backoff >= 3 ? ' – am besten das Prüfintervall für dieses Ziel erhöhen' : '');
+      }
       if (t.lastError !== msg) log('error', `${t.name}: ${msg}`);
       t.lastError = msg;
     }
@@ -291,7 +297,7 @@ ipcMain.handle('addTarget', (_e, t) => {
 ipcMain.handle('updateTarget', (_e, id, p) => {
   const t = state.targets.find(x => x.id === id);
   if (t) {
-    if ('enabled' in p) { t.enabled = !!p.enabled; if (!t.enabled) t.live = false; }
+    if ('enabled' in p) { t.enabled = !!p.enabled; if (!t.enabled) t.live = false; t.pauseUntil = 0; } // Pausieren/Fortsetzen hebt eine 429-Pause auf
     if ('webhook' in p) t.webhook = String(p.webhook || '');
     if (p.name) t.name = String(p.name);
     // Adresse, Modus oder Text geändert → Ziel fängt neu an zu beobachten
@@ -299,7 +305,7 @@ ipcMain.handle('updateTarget', (_e, id, p) => {
     if (p.url && /^https?:\/\//.test(p.url)) t.url = p.url;
     if (p.mode && ['queue', 'keyword', 'gone', 'change'].includes(p.mode)) t.mode = p.mode;
     if ('keyword' in p) t.keyword = String(p.keyword || '');
-    if (before !== t.url + '|' + t.mode + '|' + t.keyword) { t.live = false; t.hash = undefined; t.lastError = ''; t.status = 'Wartet'; t.lastCheck = 0; }
+    if (before !== t.url + '|' + t.mode + '|' + t.keyword) { t.backoff = 0; t.pauseUntil = 0; t.live = false; t.hash = undefined; t.lastError = ''; t.status = 'Wartet'; t.lastCheck = 0; }
     Object.assign(t, targetExtras(p));
     save();
   }

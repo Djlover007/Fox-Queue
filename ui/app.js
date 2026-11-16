@@ -214,7 +214,9 @@ function render() {
   // Ziele
   const list = $('targetList');
   const listHtml = !targets.length ? '<div class="card empty">Noch keine Ziele. Füge oben eins hinzu.</div>' : targets.map(t => {
-    const badge = t.lastError ? `<span class="badge err">Fehler</span>`
+    const paused = t.enabled && t.pauseUntil > Date.now();
+    const badge = paused ? `<span class="badge warn">Pause bis ${fmtTime(t.pauseUntil).slice(0, 5)}</span>`
+      : t.lastError ? `<span class="badge err">Fehler</span>`
       : t.live ? `<span class="badge live">LIVE</span>`
       : `<span class="badge">${esc(t.status || 'Wartet')}</span>`;
     const extra = (t.intervalSec ? ` · alle ${t.intervalSec} s` : '') + (dropTime(t) > Date.now() - 600000 ? ` · ⏰ Drop ${esc(fmtDateTime(dropTime(t)))}` + (t.startAt && t.dropAt > t.startAt ? ` (Start ${Math.round((t.dropAt - t.startAt) / 60000)} Min. vorher)` : '') : '');

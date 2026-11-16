@@ -185,7 +185,7 @@ class MainActivity : Activity() {
             val o = JSONObject(json)
             synchronized(Store) {
                 Store.targets.find { it.id == id }?.let {
-                    if (o.has("enabled")) { it.enabled = o.getBoolean("enabled"); if (!it.enabled) it.live = false }
+                    if (o.has("enabled")) { it.enabled = o.getBoolean("enabled"); if (!it.enabled) it.live = false; it.pauseUntil = 0 } // Pausieren/Fortsetzen hebt eine 429-Pause auf
                     if (o.has("webhook")) it.webhook = o.optString("webhook")
                     if (o.optString("name").isNotBlank()) it.name = o.getString("name")
                     // Adresse, Modus oder Text geändert → Ziel fängt neu an zu beobachten
@@ -193,7 +193,7 @@ class MainActivity : Activity() {
                     if (o.optString("url").startsWith("http")) it.url = o.getString("url")
                     if (o.optString("mode") in listOf("queue", "keyword", "gone", "change")) it.mode = o.getString("mode")
                     if (o.has("keyword")) it.keyword = o.optString("keyword")
-                    if (before != it.url + "|" + it.mode + "|" + it.keyword) { it.live = false; it.hash = null; it.lastError = ""; it.status = "Wartet"; it.lastCheck = 0 }
+                    if (before != it.url + "|" + it.mode + "|" + it.keyword) { it.backoff = 0; it.pauseUntil = 0; it.live = false; it.hash = null; it.lastError = ""; it.status = "Wartet"; it.lastCheck = 0 }
                     applyExtras(it, o)
                 }
             }

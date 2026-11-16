@@ -13,4 +13,22 @@ function effInterval(t, standard) {
   return Math.max(20, n > 0 ? n : (Number(standard) || 60));
 }
 
-module.exports = { isQueueHost, effInterval };
+/**
+ * Pause nach „HTTP 429 – zu viele Anfragen“: 5, 10, 20, 40, höchstens 60 Minuten (verdoppelt sich bei jeder
+ * weiteren 429 in Folge). Nennt der Shop selbst eine Wartezeit (Retry-After), gilt die längere von beiden, höchstens 2 Stunden.
+ */
+function backoffMs(level, retryAfterSec) {
+  const own = Math.min(60, 5 * 2 ** (Math.max(1, level) - 1)) * 60000;
+  const asked = Math.min(7200, Math.max(0, Number(retryAfterSec) || 0)) * 1000;
+  return Math.max(own, asked);
+}
+
+/** Liest den Retry-After-Kopf: Sekunden oder ein Datum. Ergebnis in Sekunden (0 = keine Angabe). */
+function retryAfterSec(value, now = Date.now()) {
+  if (!value) return 0;
+  if (/^\s*\d+\s*$/.test(value)) return parseInt(value, 10);
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? Math.max(0, Math.round((t - now) / 1000)) : 0;
+}
+
+module.exports = { isQueueHost, effInterval, backoffMs, retryAfterSec };

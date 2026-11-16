@@ -93,3 +93,63 @@ test('Oberfläche: ungültige Eingaben werden abgefangen', async () => {
     window.close();
   }
 });
+
+test('Drop-Zeit: Vorlauf, Countdown und Eintragen aus der Statistik', async () => {
+  const { window, $, tick, errors } = await loadUi();
+  try {
+    // Ziel mit Drop-Zeit in 2 Stunden und 10 Minuten Vorlauf
+    const drop = new Date(Date.now() + 2 * 3600000); drop.setSeconds(0, 0);
+    $('fName').value = 'Pokémon Drop'; $('fUrl').value = 'shop.de/pkmn';
+    const local = new Date(drop.getTime() - drop.getTimezoneOffset() * 60000).toISOString().slice(0, 16); // Wert für datetime-local
+    $('fStart').value = local; $('fLead').value = '10';
+    $('addTarget').click(); await tick();
+    assert.match($('targetList').innerHTML, /⏰ Drop/);
+    assert.match($('targetList').innerHTML, /Start 10 Min\. vorher/);
+    assert.equal($('dropBar').classList.contains('hidden'), false);
+    assert.match($('dropText').textContent, /Pokémon Drop: Drop in 0[12]:\d\d:\d\d/);
+    assert.match($('dropSub').textContent, /Fox Queue startet in 01:\d\d:\d\d/);
+
+    // Bearbeiten zeigt Drop-Zeit und Vorlauf wieder an
+    $('targetList').querySelector('button[data-act="edit"]').click(); await tick();
+    assert.equal($('fLead').value, '10');
+    assert.equal($('fStart').value, local);
+    $('cancelEdit').click(); await tick();
+
+    // Statistik: Vorschau-Daten haben Drops für Ziel „a“ → Zeitfenster, Eintragen setzt die Drop-Zeit
+    window.document.querySelector('.nav-item[data-page="stats"]').click(); await tick();
+    assert.ok($('slotList').querySelectorAll('.slot').length >= 1);
+    assert.equal($('slotList').querySelectorAll('button').length, 0, 'ohne gewähltes Ziel kein Knopf');
+    $('statTarget').value = 'a'; $('statTarget').dispatchEvent(new window.Event('change')); await tick();
+    const btn = $('slotList').querySelector('button[data-slot]');
+    assert.ok(btn, 'mit gewähltem Ziel gibt es den Knopf');
+    const when = Number(btn.dataset.slot);
+    assert.ok(when > Date.now());
+    btn.click(); await tick();
+    assert.match($('slotHint').textContent, /Drop-Zeit für „Pokémon Drop“ eingetragen/);
+    assert.deepEqual(errors, []);
+  } finally {
+    window.close();
+  }
+});
+
+test('Typische Drop-Zeiten: häufigstes Zeitfenster zuerst, nächster Termin liegt in der Zukunft', async () => {
+  const { window } = await loadUi();
+  try {
+    const topSlots = window.eval('topSlots'), nextOccurrence = window.eval('nextOccurrence'), countdown = window.eval('countdown');
+    const at = (y, m, d, h) => ({ t: new Date(y, m - 1, d, h, 15).getTime() });
+    // 3x Freitag 10 Uhr, 1x Montag 18 Uhr
+    const slots = topSlots([at(2026, 11, 6, 10), at(2026, 11, 13, 10), at(2026, 11, 9, 18), at(2026, 10, 30, 10)]);
+    assert.deepEqual([slots[0].day, slots[0].hour, slots[0].n], [4, 10, 3]);
+    assert.deepEqual([slots[1].day, slots[1].hour, slots[1].n], [0, 18, 1]);
+
+    const mon = new Date(2026, 10, 16, 8, 0).getTime();           // Montag, 16.11.2026, 08:00
+    assert.equal(new Date(nextOccurrence(4, 10, mon)).toString(), new Date(2026, 10, 20, 10, 0).toString());  // Freitag derselben Woche
+    assert.equal(new Date(nextOccurrence(0, 18, mon)).toString(), new Date(2026, 10, 16, 18, 0).toString());  // heute Abend
+    assert.equal(new Date(nextOccurrence(0, 7, mon)).toString(), new Date(2026, 10, 23, 7, 0).toString());    // schon vorbei → nächste Woche
+
+    assert.equal(countdown(3872000), '01:04:32');
+    assert.equal(countdown(3 * 86400000 + 4 * 3600000), '3 Tagen 4 Std.');
+  } finally {
+    window.close();
+  }
+});

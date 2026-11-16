@@ -46,6 +46,8 @@
       </div>
     </div>
 
+    <div class="drop-bar hidden" id="dropBar"><span id="dropText"></span><span class="muted" id="dropSub"></span></div>
+
     <div class="update-bar hidden" id="updateBar">
       <span id="updateText">Update verfügbar</span>
       <div class="update-progress hidden" id="updateProgress"><div id="updateProgressFill"></div></div>
@@ -110,7 +112,8 @@
           <label id="fKeywordWrap" class="hidden">Text<input id="fKeyword" placeholder="In den Warenkorb" /></label>
           <label>Eigener Discord-Webhook (optional, sonst der aus den Einstellungen)<input id="fWebhook" placeholder="https://discord.com/api/webhooks/..." /></label>
           <label>Eigenes Prüfintervall in Sekunden (optional, mind. 20 – leer = Standard aus den Einstellungen)<input id="fInterval" type="number" min="20" step="5" placeholder="Standard" /></label>
-          <label>Startzeit (optional) – dann startet der Monitor von selbst und öffnet die Fenster<input id="fStart" type="datetime-local" /></label>
+          <label>Drop-Zeit (optional) – wann es losgeht<input id="fStart" type="datetime-local" /></label>
+          <label>Vorlauf in Minuten – so viel früher weckt dich Fox Queue, startet den Monitor und öffnet die Fenster<input id="fLead" type="number" min="0" max="120" value="5" /></label>
           <label>Eigene Fenster (1–20), die „Eigene Fenster öffnen“ und die Startzeit aufmachen<input id="fWindows" type="number" min="1" max="20" value="1" /></label>
           <div class="row">
             <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
@@ -148,6 +151,12 @@
           <div class="card-head"><h2>Nach Uhrzeit</h2></div>
           <div class="bars hours" id="hourBars"></div>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Typische Drop-Zeiten</h2></div>
+        <div class="slot-list" id="slotList"></div>
+        <p class="muted small-text" id="slotHint"></p>
       </div>
 
       <div class="card">

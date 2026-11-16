@@ -101,13 +101,13 @@ function load() {
   try {
     const d = JSON.parse(fs.readFileSync(DATA_FILE(), 'utf8'));
     state.config = { ...state.config, ...(d.config || {}) };
-    state.targets = (d.targets || []).map(t => ({ webhook: '', intervalSec: 0, startAt: 0, windows: 1, ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
+    state.targets = (d.targets || []).map(t => ({ webhook: '', intervalSec: 0, startAt: 0, dropAt: 0, windows: 1, ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
     state.events = Array.isArray(d.events) ? d.events : [];
     try { setProxy(state.config.proxy); } catch (e) { log('error', `Proxy ungültig: ${e.message}`); }
   } catch { /* erster Start */ }
 }
 function save() {
-  const targets = state.targets.map(({ id, name, url, mode, keyword, enabled, webhook, intervalSec, startAt, windows }) => ({ id, name, url, mode, keyword, enabled, webhook: webhook || '', intervalSec: intervalSec || 0, startAt: startAt || 0, windows: windows || 1 }));
+  const targets = state.targets.map(({ id, name, url, mode, keyword, enabled, webhook, intervalSec, startAt, dropAt, windows }) => ({ id, name, url, mode, keyword, enabled, webhook: webhook || '', intervalSec: intervalSec || 0, startAt: startAt || 0, dropAt: dropAt || 0, windows: windows || 1 }));
   fs.mkdirSync(path.dirname(DATA_FILE()), { recursive: true });
   fs.writeFileSync(DATA_FILE(), JSON.stringify({ config: state.config, targets, events: state.events }, null, 2));
 }
@@ -279,6 +279,7 @@ function targetExtras(p) {
   const out = {};
   if ('intervalSec' in p) { const n = parseInt(p.intervalSec, 10) || 0; out.intervalSec = n > 0 ? Math.max(20, n) : 0; }
   if ('startAt' in p) out.startAt = Math.max(0, Number(p.startAt) || 0);
+  if ('dropAt' in p) out.dropAt = Math.max(0, Number(p.dropAt) || 0); // Drop-Zeit, nur für Anzeige und Countdown
   if ('windows' in p) out.windows = Math.min(TASK_MAX, Math.max(1, parseInt(p.windows, 10) || 1));
   return out;
 }
@@ -487,7 +488,7 @@ function fireDueStarts() {
     if (!t.enabled) t.enabled = true;
     start();
     openTaskWindows(t.url, t.name, t.windows || 1);
-    if (state.config.notify && Notification.isSupported()) new Notification({ title: `⏰ Startzeit: ${t.name}`, body: `Monitor läuft, ${t.windows || 1} Fenster geöffnet.` }).show();
+    if (state.config.notify && Notification.isSupported()) new Notification({ title: `⏰ Gleich geht's los: ${t.name}`, body: (t.dropAt > now ? `Drop um ${new Date(t.dropAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr. ` : '') + `Monitor läuft, ${t.windows || 1} Fenster geöffnet.` }).show();
   }
 }
 

@@ -43,7 +43,7 @@ const bridge = (() => {
   return {
     getState: ok,
     saveConfig: (c) => { s.config = { ...s.config, ...c }; return ok(); },
-    addTarget: (t) => { s.targets.push({ intervalSec: 0, startAt: 0, windows: 1, ...t, id: s.targets.length ? Date.now().toString(36) + s.targets.length : 'a', enabled: true, status: 'Wartet' }); return ok(); },
+    addTarget: (t) => { s.targets.push({ intervalSec: 0, startAt: 0, dropAt: 0, windows: 1, ...t, id: s.targets.length ? Date.now().toString(36) + s.targets.length : 'a', enabled: true, status: 'Wartet' }); return ok(); },
     updateTarget: (id, p) => { s.targets = s.targets.map(t => t.id === id ? { ...t, ...p } : t); return ok(); },
     removeTarget: (id) => { s.targets = s.targets.filter(t => t.id !== id); return ok(); },
     start: () => { s.running = true; return ok(); },
@@ -85,6 +85,33 @@ const fmtDateTime = (ms) => new Date(ms).toLocaleString('de-DE', { weekday: 'sho
 // Zeitstempel <-> Wert eines datetime-local-Feldes (Ortszeit)
 const toLocalInput = (ms) => { if (!ms) return ''; const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
 const fromLocalInput = (v) => { const t = v ? new Date(v).getTime() : 0; return Number.isFinite(t) ? t : 0; };
+const LEAD_DEFAULT = 5;        // Minuten Vorlauf vor der Drop-Zeit
+const dropTime = (t) => t.dropAt || t.startAt || 0;
+/** „in 3 Tagen 4 Std.“ oder 01:04:32 */
+function countdown(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s >= 86400) { const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600); return `${d} ${d === 1 ? 'Tag' : 'Tagen'}${h ? ` ${h} Std.` : ''}`; }
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+/** Die häufigsten Zeitfenster (Wochentag + Stunde) aus den gemeldeten Drops, häufigstes zuerst. */
+function topSlots(events, max = 3) {
+  const m = new Map();
+  for (const e of events) {
+    const d = new Date(e.t), key = ((d.getDay() + 6) % 7) * 24 + d.getHours();
+    const c = m.get(key) || { day: Math.floor(key / 24), hour: key % 24, n: 0, last: 0 };
+    c.n++; c.last = Math.max(c.last, e.t); m.set(key, c);
+  }
+  return [...m.values()].sort((a, b) => b.n - a.n || b.last - a.last).slice(0, max);
+}
+/** Nächster Zeitpunkt für Wochentag (0 = Montag) und volle Stunde nach „now“. */
+function nextOccurrence(day, hour, now = Date.now()) {
+  const d = new Date(now);
+  d.setHours(hour, 0, 0, 0);
+  d.setDate(d.getDate() + ((day - (d.getDay() + 6) % 7) + 7) % 7);
+  if (d.getTime() <= now) d.setDate(d.getDate() + 7);
+  return d.getTime();
+}
 const WIN_STATUS = { loading: ['Lädt', ''], open: ['Offen', ''], queue: ['Warteschlange', 'queue'], captcha: ['Captcha', 'warn'], passed: ['Durch', 'live'], killed: ['Angehalten', 'err'] };
 const openHooks = new Set();   // aufgeklappte „Discord-Kanal“-Bereiche
 let lastListHtml = '', lastFeedHtml = '', lastStatsKey = '';
@@ -182,6 +209,7 @@ function render() {
   renderAlarm();
   renderStats();
   renderWindows();
+  renderDrop();
 
   // Ziele
   const list = $('targetList');
@@ -189,7 +217,7 @@ function render() {
     const badge = t.lastError ? `<span class="badge err">Fehler</span>`
       : t.live ? `<span class="badge live">LIVE</span>`
       : `<span class="badge">${esc(t.status || 'Wartet')}</span>`;
-    const extra = (t.intervalSec ? ` · alle ${t.intervalSec} s` : '') + (t.startAt ? ` · ⏰ Start ${esc(fmtDateTime(t.startAt))}` : '');
+    const extra = (t.intervalSec ? ` · alle ${t.intervalSec} s` : '') + (dropTime(t) > Date.now() - 600000 ? ` · ⏰ Drop ${esc(fmtDateTime(dropTime(t)))}` + (t.startAt && t.dropAt > t.startAt ? ` (Start ${Math.round((t.dropAt - t.startAt) / 60000)} Min. vorher)` : '') : '');
     return `<div class="target ${t.enabled ? '' : 'off'} ${editingId === t.id ? 'editing' : ''}">
       <div class="target-top"><span class="target-name">${esc(t.name)}</span>${badge}</div>
       <div class="target-url">${esc(t.url)}</div>
@@ -211,6 +239,19 @@ function render() {
   }).join('');
   // Nicht neu zeichnen, während du tippst – und nur, wenn sich etwas geändert hat
   if (listHtml !== lastListHtml && !list.contains(document.activeElement)) { list.innerHTML = listHtml; lastListHtml = listHtml; }
+}
+
+// Countdown bis zum nächsten Drop (oben auf jeder Seite)
+function renderDrop() {
+  const now = Date.now();
+  const next = state.targets.filter(t => dropTime(t) > now - 600000).sort((a, b) => dropTime(a) - dropTime(b))[0];
+  $('dropBar').classList.toggle('hidden', !next);
+  if (!next) return;
+  const at = dropTime(next), live = at <= now;
+  $('dropBar').classList.toggle('now', live);
+  $('dropText').textContent = live ? `🔥 ${next.name}: Drop läuft seit ${countdown(now - at)}` : `⏰ ${next.name}: Drop in ${countdown(at - now)}`;
+  $('dropSub').textContent = live ? '' : fmtDateTime(at) + ' Uhr'
+    + (next.startAt > now ? ` · Fox Queue startet in ${countdown(next.startAt - now)}` : next.dropAt ? ' · Monitor und Fenster sind gestartet' : '');
 }
 
 // Übersicht der eigenen Fenster auf dem Dashboard
@@ -284,6 +325,20 @@ function renderStats() {
 
   $('dayBars').innerHTML = bars(days, DAYS, topDay);
   $('hourBars').innerHTML = bars(hours, hours.map((_, h) => (h % 3 === 0 ? String(h) : '')), topHour);
+  // Typische Drop-Zeiten: nur echte Drop-Meldungen der Ziele (ohne „Du bist dran“ aus den Fenstern)
+  const drops = ev.filter(e => e.targetId !== 'task');
+  const target = state.targets.find(t => t.id === sel.value);
+  const slots = drops.length >= 3 ? topSlots(drops) : [];
+  $('slotList').innerHTML = slots.map(sl => {
+    const next = nextOccurrence(sl.day, sl.hour);
+    return `<div class="slot"><span class="slot-when">${DAYS_LONG[sl.day]}, ${String(sl.hour).padStart(2, '0')}–${String((sl.hour + 1) % 24).padStart(2, '0')} Uhr</span>
+      <span class="slot-info">${sl.n} von ${drops.length} Drops · nächstes Mal ${esc(fmtDateTime(next))}</span>
+      ${target ? `<button class="btn small" data-slot="${next}">Als Drop-Zeit eintragen</button>` : ''}</div>`;
+  }).join('');
+  $('slotHint').textContent = drops.length < 3 ? 'Ab drei gemeldeten Drops zeigt Fox Queue hier, an welchen Tagen und zu welcher Uhrzeit es bisher am häufigsten losging.'
+    : (target ? `Eintragen setzt die Drop-Zeit von „${target.name}“ (${LEAD_DEFAULT} Minuten Vorlauf). ` : 'Wähle oben ein Ziel, dann kannst du eine Zeit als Drop-Zeit eintragen. ')
+      + 'Das ist nur ein Rückblick auf bisherige Drops – keine Garantie für den nächsten.';
+
   $('eventList').innerHTML = ev.length
     ? ev.slice(-50).reverse().map(e => `<div class="feed-item alert"><span class="time">${new Date(e.t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}<br>${fmtTime(e.t).slice(0, 5)}</span><span>${esc(e.name)}<br><span class="muted">${MODE_LABEL[e.mode] || ''} · ${DAYS_LONG[(new Date(e.t).getDay() + 6) % 7]}</span></span></div>`).join('')
     : '<div class="empty">Sobald Fox Queue einen Drop meldet, taucht er hier auf.</div>';
@@ -370,10 +425,16 @@ function readForm() {
   if ((mode === 'keyword' || mode === 'gone') && !keyword) return alert('Bitte den Text eingeben, auf den geachtet werden soll.');
   const iv = parseInt($('fInterval').value, 10) || 0;
   if (iv && iv < 20) return alert('Das eigene Prüfintervall muss mindestens 20 Sekunden sein.');
-  const startAt = fromLocalInput($('fStart').value);
-  if (startAt && startAt < Date.now()) return alert('Die Startzeit liegt in der Vergangenheit.');
+  const dropAt = fromLocalInput($('fStart').value);
+  if (dropAt && dropAt < Date.now()) return alert('Die Drop-Zeit liegt in der Vergangenheit.');
+  const lead = Math.min(120, Math.max(0, parseInt($('fLead').value, 10) || 0));
+  // Vorlauf schon angebrochen → gleich starten
+  let startAt = dropAt ? Math.max(dropAt - lead * 60000, Date.now() + 2000) : 0;
+  // Beim Bearbeiten: schon gestartet und Drop-Zeit unverändert → nicht noch einmal starten
+  const old = editingId && state.targets.find(t => t.id === editingId);
+  if (old && dropAt && old.dropAt === dropAt && !old.startAt) startAt = 0;
   return { name: name || new URL(url).host, url, mode, keyword: (mode === 'keyword' || mode === 'gone') ? keyword : '', webhook,
-    intervalSec: iv, startAt, windows: clampWin($('fWindows').value) };
+    intervalSec: iv, startAt, dropAt, windows: clampWin($('fWindows').value) };
 }
 
 function setForm(t) {
@@ -382,7 +443,8 @@ function setForm(t) {
   $('fMode').value = t ? t.mode : $('fMode').value;
   $('fKeyword').value = t ? (t.keyword || '') : ''; $('fWebhook').value = t ? (t.webhook || '') : '';
   $('fInterval').value = t && t.intervalSec ? t.intervalSec : '';
-  $('fStart').value = t ? toLocalInput(t.startAt) : '';
+  $('fStart').value = t && dropTime(t) > Date.now() ? toLocalInput(dropTime(t)) : '';
+  $('fLead').value = t && t.dropAt && t.startAt ? Math.max(0, Math.round((t.dropAt - t.startAt) / 60000)) : LEAD_DEFAULT;
   $('fWindows').value = t ? clampWin(t.windows) : 1;
   $('fMode').dispatchEvent(new Event('change'));
   $('formTitle').textContent = t ? `„${t.name}“ bearbeiten` : 'Neues Ziel';
@@ -457,6 +519,15 @@ $('alarmOpen').addEventListener('click', async () => {
   render();
 });
 $('statTarget').addEventListener('change', () => { lastStatsKey = ''; renderStats(); });
+$('slotList').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-slot]');
+  const t = state.targets.find(x => x.id === $('statTarget').value);
+  if (!b || !t) return;
+  const dropAt = Number(b.dataset.slot);
+  state = await bridge.updateTarget(t.id, { dropAt, startAt: Math.max(dropAt - LEAD_DEFAULT * 60000, Date.now() + 2000) });
+  lastListHtml = ''; lastStatsKey = ''; render();
+  $('slotHint').textContent = `Drop-Zeit für „${t.name}“ eingetragen: ${fmtDateTime(dropAt)} Uhr. Fox Queue startet ${LEAD_DEFAULT} Minuten vorher.`;
+});
 $('clearStats').addEventListener('click', async () => {
   if (!confirm('Die ganze Drop-Statistik löschen?')) return;
   state = await bridge.clearStats(); lastStatsKey = ''; render();
@@ -531,7 +602,7 @@ function parseImport(text, existing) {
       && (!(t.mode === 'keyword' || t.mode === 'gone') || (typeof t.keyword === 'string' && t.keyword.trim()));
     if (!ok) { out.invalid++; continue; }
     const c = { name: String(t.name || new URL(t.url).host).slice(0, 80), url: t.url, mode: t.mode, keyword: String(t.keyword || ''),
-      webhook: isHook(String(t.webhook || '')) ? t.webhook : '', intervalSec: Math.max(0, parseInt(t.intervalSec, 10) || 0), startAt: 0, windows: clampWin(t.windows) };
+      webhook: isHook(String(t.webhook || '')) ? t.webhook : '', intervalSec: Math.max(0, parseInt(t.intervalSec, 10) || 0), startAt: 0, dropAt: 0, windows: clampWin(t.windows) };
     if (c.intervalSec && c.intervalSec < 20) c.intervalSec = 20;
     if (seen.has(key(c))) { out.skipped++; continue; }
     seen.add(key(c)); out.add.push(c);
@@ -566,4 +637,4 @@ refresh().then(fillSettings);
 setInterval(refresh, 1000);
 
 // Für die automatischen Tests
-if (typeof module !== 'undefined') module.exports = { exportTargets, parseImport, toLocalInput, fromLocalInput };
+if (typeof module !== 'undefined') module.exports = { exportTargets, parseImport, toLocalInput, fromLocalInput, topSlots, nextOccurrence, countdown };

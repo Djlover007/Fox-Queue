@@ -11,7 +11,7 @@ Danach stellst du dich ganz normal selbst an. Fox Queue löst keine Captchas und
 
 ## Funktionen
 
-- **Ziele:** pro Ziel eigenes Prüfintervall, eigener Discord-Kanal und eine **Startzeit** (Monitor startet von selbst und öffnet die Fenster). Ziele lassen sich bearbeiten und unter *Einstellungen → Ziele übertragen* als Text aufs andere Gerät mitnehmen.
+- **Ziele:** pro Ziel eigenes Prüfintervall, eigener Discord-Kanal und eine **Drop-Zeit mit Vorlauf** (ein paar Minuten vorher weckt dich Fox Queue, startet den Monitor und öffnet die Fenster; oben läuft ein Countdown). Die Statistik zeigt **typische Drop-Zeiten** aus bisherigen Meldungen und trägt sie auf Wunsch als Drop-Zeit ein. Ziele lassen sich bearbeiten und unter *Einstellungen → Ziele übertragen* als Text aufs andere Gerät mitnehmen.
 - **Eigene Fenster:** eine Seite in bis zu 20 eigenen Fenstern öffnen. Das Dashboard zeigt für jedes Fenster den Status (Lädt, Warteschlange mit Platz und Wartezeit, Captcha, Durch) und kann sie zeigen oder schließen; unter Windows auch als Raster anordnen.
 - **„Du bist dran“:** Verlässt ein Fenster die Warteschlange (Queue-it, Cloudflare Waiting Room, shop-eigene Warteseiten), gibt es Alarm. Antippen holt genau dieses Fenster nach vorn.
 - **Captcha-Hinweis:** Taucht in einem Fenster ein Captcha auf, meldet Fox Queue das (abschaltbar, wahlweise mit Ton). Lösen musst du es selbst.

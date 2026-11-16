@@ -39,6 +39,7 @@ object Store {
         var webhook: String = "",
         var intervalSec: Int = 0,   // eigenes Prüfintervall, 0 = Standard aus den Einstellungen
         var startAt: Long = 0,      // Startzeit (ms), 0 = keine
+        var dropAt: Long = 0,       // Drop-Zeit (ms) für Anzeige und Countdown; startAt liegt um den Vorlauf davor
         var windows: Int = 1,       // so viele eigene Fenster öffnet „Eigene Fenster öffnen“ / die Startzeit
         var status: String = "Wartet", var live: Boolean = false, var lastCheck: Long = 0, var lastError: String = "", var hash: String? = null,
     )
@@ -94,7 +95,7 @@ object Store {
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             targets.add(Target(o.getString("id"), o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), o.optBoolean("enabled", true), o.optString("webhook"),
-                o.optInt("intervalSec", 0), o.optLong("startAt", 0), o.optInt("windows", 1).coerceIn(1, MAX_WINDOWS)))
+                o.optInt("intervalSec", 0), o.optLong("startAt", 0), o.optLong("dropAt", 0), o.optInt("windows", 1).coerceIn(1, MAX_WINDOWS)))
         }
         scheduleStarts(ctx)
     }
@@ -103,7 +104,7 @@ object Store {
         val arr = JSONArray()
         targets.forEach {
             arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook)
-                .put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("windows", it.windows))
+                .put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows))
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
             .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putBoolean("openBrowser", openBrowser).putString("proxy", proxy)
@@ -124,7 +125,7 @@ object Store {
         val ts = JSONArray()
         targets.forEach {
             ts.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword)
-                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("windows", it.windows).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
+                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError))
         }
         val ws = JSONArray()
         windows.values.sortedBy { it.id }.forEach {
@@ -658,7 +659,7 @@ object Store {
                 main.post { try { TaskActivity.open(ctx, t.url, t.name, t.windows) } catch (_: Exception) { } }
             } else {
                 // Aus dem Hintergrund darf Android keine Fenster öffnen → Alarm, Antippen öffnet sie
-                if (sound) startAlarm(ctx, t, "Startzeit erreicht")
+                if (sound) startAlarm(ctx, t, "Gleich geht's los")
                 val open = PendingIntent.getActivity(
                     ctx, 60_000 + (t.id.hashCode() and 0xfff),
                     Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_OPEN_WINDOWS).putExtra("targetId", t.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -670,8 +671,8 @@ object Store {
                 )
                 val n = Notification.Builder(ctx, CH_ALERT)
                     .setSmallIcon(R.drawable.ic_stat_fox)
-                    .setContentTitle("⏰ Startzeit: ${t.name}")
-                    .setContentText("Monitor läuft – antippen öffnet ${t.windows} Fenster")
+                    .setContentTitle("⏰ Gleich geht's los: ${t.name}")
+                    .setContentText((if (t.dropAt > now) "Drop um " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t.dropAt)) + " Uhr – " else "") + "antippen öffnet ${t.windows} Fenster")
                     .setContentIntent(open).setDeleteIntent(silence).setAutoCancel(true)
                     .setCategory(Notification.CATEGORY_ALARM)
                     .build()

@@ -146,6 +146,7 @@ class MainActivity : Activity() {
         private fun applyExtras(t: Store.Target, o: JSONObject) {
             if (o.has("intervalSec")) t.intervalSec = o.optInt("intervalSec", 0).let { if (it > 0) maxOf(20, it) else 0 }
             if (o.has("startAt")) t.startAt = maxOf(0L, o.optLong("startAt", 0))
+            if (o.has("dropAt")) t.dropAt = maxOf(0L, o.optLong("dropAt", 0))
             if (o.has("windows")) t.windows = o.optInt("windows", 1).coerceIn(1, Store.MAX_WINDOWS)
         }
 

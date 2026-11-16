@@ -589,7 +589,16 @@ object Store {
 
     /** Android hat ein Fenster im Hintergrund beendet: merken und melden. Beim Öffnen lädt es sich neu. */
     fun windowKilled(ctx: Context, id: Int, title: String) {
-        windows[id]?.let { it.status = "killed"; it.pos = ""; it.wait = "" }
+        val app = ctx.applicationContext
+        // Kurz warten: Wurde das Fenster in der Übersicht weggewischt, gibt es den Task nicht mehr → kein Hinweis
+        main.postDelayed({ windowKilledNow(app, id, title) }, 1500)
+    }
+
+    private fun windowKilledNow(ctx: Context, id: Int, title: String) {
+        val gone = try { appTask(ctx, id) == null } catch (_: Exception) { true }
+        if (gone) { windows.remove(id); return }
+        val w = windows[id] ?: return
+        w.status = "killed"; w.pos = ""; w.wait = ""
         log("error", "Android hat ein Fenster angehalten: $title – beim Öffnen lädt es neu")
         if (!notify) return
         val focus = PendingIntent.getActivity(

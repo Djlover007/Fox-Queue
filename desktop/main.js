@@ -91,6 +91,7 @@ const state = {
   ringing: null, // laufender Ton-Alarm: { name, url, t }
 };
 let ringTimer = null;
+let ringingWin = null; // Zielfenster, das gerade „Du bist dran“ klingelt
 let loopTimer = null;
 let win = null;
 
@@ -145,6 +146,7 @@ async function alarm(t, title, body, { test = false } = {}) {
 }
 
 function stopAlarm() {
+  ringingWin = null;
   clearTimeout(ringTimer);
   state.ringing = null;
 }
@@ -313,6 +315,45 @@ function watchCaptcha(w, title, url) {
   w.on('focus', () => w.flashFrame(false));
   w.on('closed', () => clearInterval(timer));
 }
+// „Du bist dran“: Fenster verlässt die Queue-it-Warteschlange
+const isQueueHost = (u) => { try { const h = new URL(u).hostname.toLowerCase(); return h === 'queue-it.net' || h.endsWith('.queue-it.net') || h.startsWith('queue.'); } catch { return false; } };
+function watchQueue(w, title, url) {
+  let wasInQueue = false;
+  const onNav = (_e, u) => {
+    if (!/^https?:/.test(u)) return;
+    if (isQueueHost(u)) { wasInQueue = true; return; }
+    if (!wasInQueue) return;
+    wasInQueue = false;
+    state.stats.alerts++;
+    state.events.push({ t: Date.now(), targetId: 'task', name: title, mode: 'queue' });
+    if (state.events.length > 1000) state.events.splice(0, state.events.length - 1000);
+    save();
+    log('alert', `🎉 Du bist dran: ${title}`);
+    if (w.isFocused()) return; // du schaust schon drauf
+    if (state.config.sound) {
+      state.ringing = { name: title, url, title: 'Du bist dran', t: Date.now() };
+      clearTimeout(ringTimer);
+      ringTimer = setTimeout(stopAlarm, 120000);
+      ringingWin = w;
+    }
+    if (w.isMinimized()) w.restore();
+    w.moveTop(); w.flashFrame(true);
+    if (Notification.isSupported()) {
+      const n = new Notification({ title: `🎉 Du bist dran: ${title}`, body: 'Warteschlange durch – klicken und schnell weitermachen', urgency: 'critical' });
+      n.on('click', () => { if (!w.isDestroyed()) { w.show(); w.focus(); } });
+      n.show();
+    }
+    const t = state.targets.find(x => x.url === url);
+    const hook = (t && t.webhook) || state.config.webhook;
+    if (hook) sendDiscord(hook, 'Du bist dran', title, 'Die Warteschlange ist durch – du bist im Shop.', url);
+  };
+  w.webContents.on('did-navigate', onNav);
+  w.webContents.on('did-navigate-in-page', onNav);
+  // Im klingelnden Fenster angekommen → Ton aus
+  w.on('focus', () => { if (ringingWin === w) { stopAlarm(); } });
+  w.on('closed', () => { if (ringingWin === w) ringingWin = null; });
+}
+
 function openTaskWindows(url, name, count) {
   if (!/^https?:\/\//.test(url)) return;
   const n = Math.min(TASK_MAX, Math.max(1, parseInt(count, 10) || 1));
@@ -333,6 +374,7 @@ function openTaskWindows(url, name, count) {
     w.on('closed', () => taskWins.delete(w));
     taskWins.add(w);
     watchCaptcha(w, title.replace(/^🦊 /, ''), url);
+    watchQueue(w, title.replace(/^🦊 /, ''), url);
     w.loadURL(url);
   }
   if (n > 1) log('info', `${n} Fenster geöffnet: ${label}`);

@@ -28,6 +28,23 @@ class TaskActivity : Activity() {
     private var captchaShown = false
     private var lastCaptchaAlert = 0L
     private var resumed = false
+    private var wasInQueue = false
+
+    /** Queue-it-Warteschlange? (auch eigene Queue-Domains wie queue.shop.de) */
+    private fun isQueue(u: String?): Boolean {
+        val h = try { Uri.parse(u ?: return false).host?.lowercase() } catch (_: Exception) { null } ?: return false
+        return h == "queue-it.net" || h.endsWith(".queue-it.net") || h.startsWith("queue.")
+    }
+
+    /** Wird bei jedem Seitenwechsel aufgerufen: Warteschlange verlassen = du bist dran. */
+    private fun onNavigated(u: String?) {
+        if (u == null || !u.startsWith("http")) return
+        if (isQueue(u)) { wasInQueue = true; return }
+        if (wasInQueue) {
+            wasInQueue = false
+            Store.queuePassed(this, taskLabel(), url, taskId, looking = resumed)
+        }
+    }
 
     /** Schaut alle 2 Sekunden, ob ein Captcha zu sehen ist (löst nichts, meldet nur). */
     private val captchaCheck = object : Runnable {
@@ -92,18 +109,29 @@ class TaskActivity : Activity() {
                     try { startActivity(Intent(Intent.ACTION_VIEW, u)) } catch (_: Exception) { }
                     return true
                 }
+                override fun doUpdateVisitedHistory(view: WebView, u: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, u, isReload)
+                    onNavigated(u)
+                }
             }
-            if (savedInstanceState != null) restoreState(savedInstanceState) else loadUrl(this@TaskActivity.url)
+            if (savedInstanceState != null) { wasInQueue = savedInstanceState.getBoolean("wasInQueue"); restoreState(savedInstanceState) } else loadUrl(this@TaskActivity.url)
         }
         setContentView(web)
         handler.postDelayed(captchaCheck, 3000)
     }
 
-    override fun onResume() { super.onResume(); resumed = true; Store.captchaGone(this, taskId) }
+    override fun onResume() {
+        super.onResume(); resumed = true
+        Store.captchaGone(this, taskId)
+        // Du bist im klingelnden Fenster angekommen → Ton aus
+        if (Store.ringingTask == taskId) Store.stopAlarm()
+        getSystemService(android.app.NotificationManager::class.java).cancel(90_000 + taskId)
+    }
     override fun onPause() { resumed = false; super.onPause() }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putBoolean("wasInQueue", wasInQueue)
         if (::web.isInitialized) web.saveState(outState)
     }
 

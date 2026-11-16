@@ -7,7 +7,7 @@ Drop- und Queue-Monitor für **Windows** und **Android**. Fox Queue beobachtet S
 - sich die **Seite ändert**.
 
 Alarm gibt es als Benachrichtigung auf dem Gerät (antippen öffnet die Seite) und optional per **Discord-Webhook**.
-Danach stellst du dich ganz normal mit deinem eigenen Browser an. Unter *Ziele* kannst du eine Seite auch in mehreren eigenen Fenstern öffnen (bis 20). Taucht dort ein Captcha auf, meldet Fox Queue das (Benachrichtigung, Taskleiste blinkt, optional Discord) – lösen musst du es selbst. Fox Queue nutzt keine Proxies, löst keine Captchas und drängelt nicht vor.
+Danach stellst du dich ganz normal mit deinem eigenen Browser an. Unter *Ziele* kannst du eine Seite auch in mehreren eigenen Fenstern öffnen (bis 20). Taucht dort ein Captcha auf, meldet Fox Queue das (Benachrichtigung, Taskleiste blinkt, optional Discord) – lösen musst du es selbst. Verlässt ein Fenster die Queue-it-Warteschlange, gibt es den Alarm „Du bist dran“ – antippen bzw. anklicken holt genau dieses Fenster nach vorn. Fox Queue nutzt keine Proxies, löst keine Captchas und drängelt nicht vor.
 
 ## Aufbau
 

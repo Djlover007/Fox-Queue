@@ -379,6 +379,56 @@ object Store {
         if (hook.isNotBlank()) Thread { sendDiscord(hook, "Captcha wartet", name, "In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.", url) }.start()
     }
 
+    // ---------- „Du bist dran“: Warteschlange in einem eigenen Fenster durch ----------
+    /** Welches Fenster gerade klingelt (-1 = keins). Öffnest du dieses Fenster, geht der Ton aus. */
+    @Volatile var ringingTask = -1
+
+    fun queuePassed(ctx: Context, name: String, url: String, taskId: Int, looking: Boolean) {
+        synchronized(this) {
+            alerts++
+            events.add(JSONObject().put("t", System.currentTimeMillis()).put("targetId", "task").put("name", name).put("mode", "queue"))
+            while (events.size > 1000) events.removeAt(0)
+            save(ctx)
+            log("alert", "🎉 Du bist dran: $name")
+        }
+        if (looking) {
+            // Du schaust gerade auf genau dieses Fenster: nur kurz vibrieren statt Alarm
+            try { ctx.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1)) } catch (_: Exception) { }
+        } else {
+            val t = Target("task$taskId", name, url, "queue", "", true)
+            if (sound) { startAlarm(ctx, t, "Du bist dran"); ringingTask = taskId }
+            else if (vibrate) try {
+                ctx.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500), -1))
+            } catch (_: Exception) { }
+            val focus = PendingIntent.getActivity(
+                ctx, 90_000 + taskId,
+                Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACTION_FOCUS_TASK).putExtra("taskId", taskId)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val silence = PendingIntent.getBroadcast(
+                ctx, 5, Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_STOP_ALARM),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val n = Notification.Builder(ctx, CH_ALERT)
+                .setSmallIcon(R.drawable.ic_stat_fox)
+                .setContentTitle("🎉 Du bist dran: $name")
+                .setContentText("Warteschlange durch – antippen und schnell weitermachen")
+                .setContentIntent(focus)
+                .setDeleteIntent(silence)
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_ALARM)
+                .apply {
+                    if (sound) addAction(Notification.Action.Builder(
+                        android.graphics.drawable.Icon.createWithResource(ctx, R.drawable.ic_stat_fox), "Alarm aus", silence).build())
+                }
+                .build()
+            ctx.getSystemService(NotificationManager::class.java).notify(90_000 + taskId, n)
+        }
+        val hook = synchronized(this) { targets.find { it.url == url }?.webhook }.orEmpty().ifBlank { webhook }
+        if (hook.isNotBlank()) Thread { sendDiscord(hook, "Du bist dran", name, "Die Warteschlange ist durch – du bist im Shop.", url) }.start()
+    }
+
     /** Hinweis entfernen, sobald das Captcha weg ist. */
     fun captchaGone(ctx: Context, taskId: Int) {
         ctx.getSystemService(NotificationManager::class.java).cancel(80_000 + taskId)
@@ -416,6 +466,7 @@ object Store {
 
     fun stopAlarm() {
         ringing = null
+        ringingTask = -1
         main.post {
             main.removeCallbacks(autoStop)
             try { player?.stop() } catch (_: Exception) { }

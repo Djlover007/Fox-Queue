@@ -84,7 +84,7 @@ const DATA_FILE = () => path.join(app.getPath('userData'), 'foxqueue.json');
 const state = {
   running: false,
   platform: 'windows',
-  config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true, proxy: '', captchaNotify: true, captchaSound: false, tgToken: '', tgChat: '' },
+  config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true, proxy: '', captchaNotify: true, captchaSound: false, captchaFront: true, tgToken: '', tgChat: '' },
   targets: [],
   stats: { alerts: 0, errors: 0, checks: 0 },
   log: [],
@@ -418,6 +418,13 @@ function watchWindow(info) {
         n.show();
       }
       remote(hookFor(url), 'Captcha wartet', title, 'In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.', url);
+      // Fenster von selbst nach vorn holen – außer du arbeitest gerade in einem Fenster,
+      // das schon durch die Warteschlange ist oder selbst ein Captcha zeigt (dann nur blinken)
+      if (state.config.captchaFront !== false) {
+        const cur = BrowserWindow.getFocusedWindow();
+        const busy = [...taskWins.values()].some(i => i.w === cur && i.w !== w && (i.passed || i.captcha));
+        if (!busy) showWin(w);
+      }
     } else if (!d.captcha && captchaShown) {
       captchaShown = false;
       w.flashFrame(false);

@@ -91,6 +91,9 @@ class TaskActivity : Activity() {
             if (!resumed && System.currentTimeMillis() - lastCaptchaAlert > 60_000) {
                 lastCaptchaAlert = System.currentTimeMillis()
                 Store.captchaFound(this, taskLabel(), url, taskId)
+                // Dashboard gerade offen → dieses Fenster von selbst nach vorn holen.
+                // (Aus dem Hintergrund erlaubt Android das nicht; dann bleibt es bei der Meldung.)
+                if (Store.captchaNotify && Store.captchaFront && Store.foreground) Store.focusWindow(this, taskId)
             }
         } else if (!captcha && captchaShown) {
             captchaShown = false

@@ -161,6 +161,7 @@ class MainActivity : Activity() {
                 Store.openBrowser = o.optBoolean("openBrowser", false)
                 Store.captchaNotify = o.optBoolean("captchaNotify", true)
                 Store.captchaSound = o.optBoolean("captchaSound", false)
+                Store.captchaFront = o.optBoolean("captchaFront", true)
                 Store.tgToken = o.optString("tgToken", "").trim()
                 Store.tgChat = o.optString("tgChat", "").trim()
                 Store.applyProxy(o.optString("proxy", ""))

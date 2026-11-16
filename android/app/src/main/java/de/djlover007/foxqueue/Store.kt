@@ -53,6 +53,7 @@ object Store {
     var openBrowser = false
     var captchaNotify = true    // Hinweis, wenn in einem eigenen Fenster ein Captcha auftaucht
     var captchaSound = false    // … zusätzlich mit lautem Alarmton
+    var captchaFront = true     // … und das Fenster von selbst nach vorn holen (wenn das Dashboard offen ist)
     var tgToken = ""            // Telegram: Bot-Token
     var tgChat = ""             // Telegram: Chat-ID
     const val MAX_WINDOWS = 20
@@ -86,6 +87,7 @@ object Store {
         openBrowser = p.getBoolean("openBrowser", false)
         captchaNotify = p.getBoolean("captchaNotify", true)
         captchaSound = p.getBoolean("captchaSound", false)
+        captchaFront = p.getBoolean("captchaFront", true)
         tgToken = p.getString("tgToken", "") ?: ""
         tgChat = p.getString("tgChat", "") ?: ""
         applyProxy(p.getString("proxy", "") ?: "")
@@ -108,7 +110,7 @@ object Store {
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
             .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putBoolean("openBrowser", openBrowser).putString("proxy", proxy)
-            .putBoolean("captchaNotify", captchaNotify).putBoolean("captchaSound", captchaSound).putString("tgToken", tgToken).putString("tgChat", tgChat)
+            .putBoolean("captchaNotify", captchaNotify).putBoolean("captchaSound", captchaSound).putBoolean("captchaFront", captchaFront).putString("tgToken", tgToken).putString("tgChat", tgChat)
             .putString("targets", arr.toString()).putString("events", JSONArray(events).toString()).apply()
     }
 
@@ -134,7 +136,7 @@ object Store {
         return JSONObject()
             .put("running", running).put("platform", "android").put("windows", ws)
             .put("config", JSONObject().put("intervalSec", intervalSec).put("webhook", webhook).put("notify", notify).put("openBrowser", openBrowser).put("sound", sound).put("vibrate", vibrate).put("proxy", proxy)
-                .put("captchaNotify", captchaNotify).put("captchaSound", captchaSound).put("tgToken", tgToken).put("tgChat", tgChat))
+                .put("captchaNotify", captchaNotify).put("captchaSound", captchaSound).put("captchaFront", captchaFront).put("tgToken", tgToken).put("tgChat", tgChat))
             .put("events", JSONArray(events))
             .put("ringing", ringing ?: JSONObject.NULL)
             .put("targets", ts)

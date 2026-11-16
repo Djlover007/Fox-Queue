@@ -38,7 +38,7 @@ const bridge = (() => {
     const d = new Date(); d.setDate(d.getDate() - i * 3); d.setHours([10, 10, 17, 9, 10, 18][i % 6], (i * 7) % 60);
     return { t: d.getTime(), targetId: i % 3 ? 'a' : 'b', name: i % 3 ? 'Pokémon Drop' : 'Fall Out Boy', mode: 'queue' };
   });
-  let s = { running: false, platform: 'web', version: 'Vorschau', ringing: null, events: demoEvents, update: { status: 'idle', latest: '', progress: 0, message: '' }, windows: [], config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true, captchaNotify: true, captchaSound: false, tgToken: '', tgChat: '' }, targets: [], stats: { alerts: 0, errors: 0, checks: 0 }, log: [] };
+  let s = { running: false, platform: 'web', version: 'Vorschau', ringing: null, events: demoEvents, update: { status: 'idle', latest: '', progress: 0, message: '' }, windows: [], config: { intervalSec: 60, webhook: '', notify: true, openBrowser: false, sound: true, captchaNotify: true, captchaSound: false, captchaFront: true, tgToken: '', tgChat: '' }, targets: [], stats: { alerts: 0, errors: 0, checks: 0 }, log: [] };
   const ok = () => Promise.resolve(s);
   return {
     getState: ok,
@@ -201,7 +201,7 @@ function render() {
       + (targets.some(t => t.webhook) ? ` · ${targets.filter(t => t.webhook).length} Ziel(e) mit eigenem Kanal` : '')],
     ['Auto-Öffnen', config.openBrowser ? '<span class="dot ok"></span>an' : '<span class="dot"></span>aus (Meldung antippen)'],
     ['Telegram', config.tgToken && config.tgChat ? '<span class="dot ok"></span>eingerichtet' : '<span class="dot"></span>aus'],
-    ['Captcha-Hinweis', config.captchaNotify !== false ? '<span class="dot ok"></span>an' + (config.captchaSound ? ' · mit Ton' : '') : '<span class="dot"></span>aus'],
+    ['Captcha-Hinweis', config.captchaNotify !== false ? '<span class="dot ok"></span>an' + (config.captchaSound ? ' · mit Ton' : '') + (config.captchaFront !== false ? ' · Fenster kommt nach vorn' : '') : '<span class="dot"></span>aus'],
     ['Prüfung', 'bis zu 4 Ziele gleichzeitig'],
   ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join('');
 
@@ -384,6 +384,7 @@ function fillSettings() {
   $('sProxy').value = state.config.proxy || '';
   $('sCaptcha').checked = state.config.captchaNotify !== false;
   $('sCaptchaSound').checked = !!state.config.captchaSound;
+  $('sCaptchaFront').checked = state.config.captchaFront !== false;
   $('sTgToken').value = state.config.tgToken || '';
   $('sTgChat').value = state.config.tgChat || '';
   settingsDirty = false;
@@ -534,7 +535,7 @@ $('clearStats').addEventListener('click', async () => {
   state = await bridge.clearStats(); lastStatsKey = ''; render();
 });
 
-['sInterval', 'sWebhook', 'sNotify', 'sOpen', 'sSound', 'sVibrate', 'sProxy', 'sCaptcha', 'sCaptchaSound', 'sTgToken', 'sTgChat'].forEach(id => $(id).addEventListener('input', () => { settingsDirty = true; }));
+['sInterval', 'sWebhook', 'sNotify', 'sOpen', 'sSound', 'sVibrate', 'sProxy', 'sCaptcha', 'sCaptchaSound', 'sCaptchaFront', 'sTgToken', 'sTgChat'].forEach(id => $(id).addEventListener('input', () => { settingsDirty = true; }));
 
 $('saveSettings').addEventListener('click', async () => {
   const intervalSec = Math.max(20, parseInt($('sInterval').value, 10) || 60);
@@ -560,7 +561,7 @@ $('saveSettings').addEventListener('click', async () => {
   if (!!tgToken !== !!tgChat) return alert('Für Telegram brauchst du beides: Bot-Token und Chat-ID.');
   state = await bridge.saveConfig({ intervalSec, webhook, notify: $('sNotify').checked, openBrowser: $('sOpen').checked,
     sound: $('sSound').checked, vibrate: $('sVibrate').checked, proxy,
-    captchaNotify: $('sCaptcha').checked, captchaSound: $('sCaptchaSound').checked, tgToken, tgChat });
+    captchaNotify: $('sCaptcha').checked, captchaSound: $('sCaptchaSound').checked, captchaFront: $('sCaptchaFront').checked, tgToken, tgChat });
   fillSettings(); render();
 });
 

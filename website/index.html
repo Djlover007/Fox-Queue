@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fox Apps</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Alle Fox Apps von Mr.Fox an einem Ort: Android- und Windows-Apps zum Herunterladen.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: der Bau. Ein warmer Kopf mit Fuchs-Zeichen, darunter Filter und ein Raster aus App-Karten, nach Revier gruppiert. */
+:root {
+  --bg: #171210;        /* Nachtbraun */
+  --panel: #211a16;     /* Erde */
+  --panel-2: #2a211c;
+  --line: #3a2e26;
+  --text: #f4eadc;      /* Brustweiß */
+  --muted: #ab9c8c;
+  --accent: #f28c28;    /* Fell */
+  --accent-2: #d5741a;
+  --ink: #221204;       /* Schrift auf Orange */
+  --moss: #9bd36b;
+  --sky: #7fb4d8;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Instrument Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --r-card: 18px; --r-ctl: 999px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f7efe4; --panel: #fffaf3; --panel-2: #f1e5d5; --line: #e2d2bd;
+    --text: #2a1c12; --muted: #7a6656; --accent: #e07a14; --accent-2: #b85f08;
+    --ink: #fffaf3; --moss: #4f8a24; --sky: #2f6f9a; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f7efe4; --panel: #fffaf3; --panel-2: #f1e5d5; --line: #e2d2bd;
+  --text: #2a1c12; --muted: #7a6656; --accent: #e07a14; --accent-2: #b85f08;
+  --ink: #fffaf3; --moss: #4f8a24; --sky: #2f6f9a; color-scheme: light;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: var(--body); font-size: 16px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1120px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Kopf */
+header.hero {
+  margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+  padding-top: calc(env(safe-area-inset-top, 0px) + 56px);
+  padding-bottom: 40px;
+  background:
+    radial-gradient(900px 380px at 85% -10%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%),
+    var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.hero .wrap { display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: end; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+.brand svg { width: 28px; height: 28px; }
+h1 {
+  font-family: var(--display); font-weight: 800; font-size: clamp(44px, 8vw, 92px);
+  line-height: .95; letter-spacing: -.03em; margin: 18px 0 18px; text-wrap: balance;
+}
+h1 em { font-style: normal; color: var(--accent); }
+.lead { max-width: 58ch; color: var(--muted); font-size: 18px; margin: 0; }
+.count {
+  font-family: var(--display); text-align: right; color: var(--muted); font-size: 14px;
+}
+.count b { display: block; font-size: 72px; line-height: 1; color: var(--text); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Filter */
+.bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding-block: 28px 8px; }
+.chip {
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  border-radius: var(--r-ctl); padding: 8px 16px; font: 500 14px var(--body); cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--ink); }
+.search {
+  margin-left: auto; min-width: 0; flex: 0 1 260px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  border-radius: var(--r-ctl); padding: 9px 16px; font: 400 14px var(--body);
+}
+.search::placeholder { color: var(--muted); }
+
+/* Reviere */
+section.revier { padding-block: 28px 8px; }
+section.revier h2 {
+  font-family: var(--display); font-weight: 600; font-size: 22px; margin: 0 0 4px;
+  display: flex; gap: 12px; align-items: baseline;
+}
+section.revier h2 small { font: 500 13px var(--body); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+section.revier > p { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card);
+  padding: 22px; display: flex; flex-direction: column; gap: 14px; min-width: 0;
+  transition: border-color .15s, transform .15s;
+}
+.card:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); transform: translateY(-2px); }
+.card-top { display: flex; gap: 14px; align-items: center; }
+.glyph {
+  flex: none; width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--panel-2); color: var(--accent);
+}
+.glyph svg { width: 26px; height: 26px; }
+.card h3 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0; line-height: 1.15; }
+.plats { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.plat { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; }
+.plat.win { color: var(--sky); border-color: color-mix(in srgb, var(--sky) 45%, var(--line)); }
+.plat.and { color: var(--moss); border-color: color-mix(in srgb, var(--moss) 45%, var(--line)); }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14.5px; }
+.card li { display: grid; grid-template-columns: 14px 1fr; gap: 8px; }
+.card li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 9px; }
+.actions { margin-top: auto; display: flex; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+  border-radius: var(--r-ctl); padding: 9px 16px; font-weight: 600; font-size: 14px;
+}
+.btn.primary { background: var(--accent); color: var(--ink); }
+.btn.primary:hover { background: var(--accent-2); }
+.btn.ghost { border: 1px solid var(--line); color: var(--text); }
+.btn.ghost:hover { border-color: var(--accent); }
+.btn svg { width: 16px; height: 16px; }
+
+.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+/* Hinweis + Fuß */
+.note {
+  margin-block: 40px 0; padding: 22px; border-radius: var(--r-card);
+  background: var(--panel-2); display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start;
+}
+.note b { font-family: var(--display); }
+.note p { margin: 4px 0 0; color: var(--muted); font-size: 15px; max-width: 75ch; }
+.note .glyph { background: var(--panel); }
+footer { padding-block: 40px; color: var(--muted); font-size: 14px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+@media (max-width: 640px) {
+  .hero .wrap { grid-template-columns: 1fr; }
+  .count { text-align: left; }
+  .count b { font-size: 52px; display: inline; margin-right: 8px; }
+  .search { margin-left: 0; flex: 1 1 100%; }
+  .grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .card { transition: none; } .card:hover { transform: none; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="fox" viewBox="0 0 32 32"><path fill="currentColor" d="M3 3l8 7h10l8-7-2 13c0 7-5 13-11 13S5 23 5 16L3 3z"/><path fill="var(--bg)" d="M11 17a1.6 1.6 0 1 0 0 .1zm10 0a1.6 1.6 0 1 0 0 .1zM14 23h4l-2 2z"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 6h16M4 12h10M4 18h6M18 14v6M15 17h6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-voice" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 3l4 3 4-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor"/><circle cx="17" cy="16" r="3" fill="currentColor"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-fuel" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 20V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v15M3 20h12M6 8h6M14 10h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 2v1.5M2 9h1.5M4 4l1 1M14 4l-1 1M8 20h9a4 4 0 0 0 0-8 5 5 0 0 0-9.5 1.5A3.3 3.3 0 0 0 8 20z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 5h12v9H9l-4 3v-3H4zM16 9h4v8h-1v3l-4-3h-4v-3"/></symbol>
+    <symbol id="i-car" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M3 16v-4l2-5h14l2 5v4zM3 16v3h3v-3M18 16v3h3v-3"/><circle cx="7.5" cy="12.5" r="1" fill="currentColor"/><circle cx="16.5" cy="12.5" r="1" fill="currentColor"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke="currentColor" stroke-width="2" stroke-dasharray="2 2"/></symbol>
+    <symbol id="i-plane" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M21 4L3 11l7 2 2 7z"/><path d="M10 13l11-9" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-press" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 20h16M6 20v-6h12v6M8 14V8h8v6M12 3v5"/></symbol>
+    <symbol id="i-gh" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></symbol>
+  </defs>
+</svg>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <div class="brand"><svg style="color:var(--accent)"><use href="#fox"/></svg>Design by Mr.Fox</div>
+      <h1>Der <em>Fox</em>&nbsp;Bau</h1>
+      <p class="lead">Alle meine Apps an einem Ort. Gebaut für den Alltag, ohne Konto, ohne Abo. Jede App holt sich Updates selbst, sobald eine neue Version fertig ist.</p>
+    </div>
+    <div class="count"><b id="count">13</b>Apps im Bau</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="bar" role="toolbar" aria-label="Apps filtern">
+    <button class="chip" data-f="alle" aria-pressed="true">Alle</button>
+    <button class="chip" data-f="medien" aria-pressed="false">Medien</button>
+    <button class="chip" data-f="alarm" aria-pressed="false">Alarm &amp; Jagd</button>
+    <button class="chip" data-f="alltag" aria-pressed="false">Alltag</button>
+    <button class="chip" data-f="werkstatt" aria-pressed="false">Werkstatt</button>
+    <button class="chip" data-f="windows" aria-pressed="false">Auch für Windows</button>
+    <input class="search" id="q" type="search" placeholder="App suchen …" aria-label="App suchen">
+  </div>
+  <div id="apps"></div>
+  <p class="empty" id="empty" hidden>Keine App passt zu dieser Suche.</p>
+
+  <div class="note">
+    <div class="glyph"><svg><use href="#fox"/></svg></div>
+    <div>
+      <b>So installierst du eine App</b>
+      <p>„Herunterladen“ öffnet die neueste Version. Dort die <strong>.apk</strong> laden und antippen. Beim ersten Mal fragt Android, ob Apps aus dieser Quelle installiert werden dürfen: einmal erlauben. Danach meldet sich die App selbst, wenn es ein Update gibt.</p>
+    </div>
+  </div>
+</main>
+
+<footer class="wrap">
+  <span>Fox Apps · Design by Mr.Fox</span>
+  <a href="https://github.com/Djlover007" target="_blank" rel="noopener">github.com/Djlover007</a>
+</footer>
+
+<script>
+const GH = "https://github.com/Djlover007/";
+const REVIERE = {
+  medien:    ["Medien", "Schauen, hören, speichern", "Videos sichern, vertonen, Live-TV und Musik."],
+  alarm:     ["Alarm & Jagd", "Wach, wenn's zählt", "Beobachten Seiten für dich und melden sich im richtigen Moment."],
+  alltag:    ["Alltag", "Für jeden Tag", "Tanken, Wetter, Sprachen und sicher surfen."],
+  werkstatt: ["Werkstatt", "Auto und Arbeit", "Diagnose am Auto und Hilfe an der Maschine."]
+};
+const APPS = [
+  { name:"Fox Loader", repo:"Fox-Loader", r:"medien", icon:"down", plat:["and"],
+    text:"Videos, GIFs, Bilder und Ton aufs Handy speichern, direkt aus der Teilen-Funktion.",
+    pts:["X, TikTok, Instagram, Facebook, Reddit, YouTube, Telegram","Qualität wählen bis 1080p, TikTok ohne Wasserzeichen","„Nur Ton“ als MP3 oder M4A, Browser mit Werbeblocker"] },
+  { name:"Fox Dub", repo:"Fox-Dub", r:"medien", icon:"voice", plat:["and"],
+    text:"Englische Videos automatisch auf Deutsch vertonen, kostenlos und offline auf dem Handy.",
+    pts:["Erkennen, übersetzen, jeden Satz prüfen","Deutsche Stimme, Originalton leise darunter","Live-Untertitel über anderen Apps (ab Android 10)"] },
+  { name:"Fox Stream", repo:"Fox-Stream", r:"medien", icon:"tv", plat:["and"],
+    text:"Dein Unterhaltungshub: nur legale, kostenlose Streaming-Angebote an einem Ort.",
+    pts:["30 öffentlich-rechtliche Sender live in der App","Wochen-Watchlist und Merkliste","Suche in JustWatch, ARD, ZDF und ARTE"] },
+  { name:"Fox Musik", repo:"fox-musik", r:"medien", icon:"music", plat:["and"],
+    text:"Musik und Radio mit Widgets für den Startbildschirm und Party-Modus.",
+    pts:["Radiosender ordnen und gruppieren","Automatisch weiterspielen, schnelle Listen","Lieblingslied im Radio melden lassen"] },
+  { name:"Fox Queue", repo:"Fox-Queue", dl:"https://github.com/Djlover007/Fox-Queue-Downloads/releases/latest", r:"alarm", icon:"queue", plat:["and","win"],
+    text:"Drop- und Queue-Monitor: schlägt Alarm, sobald eine Warteschlange aufgeht oder etwas wieder lieferbar ist.",
+    pts:["Queue-it, Text erscheint/verschwindet, Seite ändert sich","Drop-Zeit mit Vorlauf und großem Countdown","Alarm aufs Gerät, per Discord und Telegram"] },
+  { name:"Fox Ticket", repo:"Fox-Ticket", r:"alarm", icon:"ticket", plat:["and","win"],
+    text:"Überwacht Eventim-Künstlerseiten und meldet sich, sobald neue Konzerttermine auftauchen.",
+    pts:["Prüft etwa alle 30 Minuten im Hintergrund","Beliebig viele Künstler per Link","Datum, Halle und Ticketstatus auf einen Blick"] },
+  { name:"Fox Testpilot", repo:"Fox-Testpilot", r:"alarm", icon:"plane", plat:["and"],
+    text:"Behält die Testpiloten-Aktionen von MediaMarkt und Saturn im Blick.",
+    pts:["Meldet neue Runden, Start der Bewerbung und letzte Tage","Liste aller Testprodukte zum Abhaken","Füllt Bewerbungsformulare mit deinen Daten vor"] },
+  { name:"Fox Tank", repo:"Fox-Tank", r:"alltag", icon:"fuel", plat:["and"],
+    text:"Günstig tanken: aktuelle Preise in deiner Nähe, als Liste oder Karte.",
+    pts:["Super E5, E10 und Diesel, nach Preis oder Entfernung","Preis-Alarm unter deinem Wunschpreis","Tankbuch mit Verbrauch und Kosten pro Monat"] },
+  { name:"Fox Wetter", repo:"Fox-Wetter", r:"alltag", icon:"sun", plat:["and"],
+    text:"Live-Wetter mit Suche nach Postleitzahl oder Ort. Kein Schlüssel, kein Konto.",
+    pts:["Suche per PLZ oder Ortsname","Daten von Open-Meteo","Update-Banner direkt in der App"] },
+  { name:"Fox VPN", repo:"Fox-VPN", r:"alltag", icon:"shield", plat:["and"],
+    text:"Kostenloses VPN mit eingebautem privatem Browser. Land wählen, großen Knopf drücken, fertig.",
+    pts:["Ein-Knopf-Verbindung, automatisch schnellster Server","Zeigt deine sichtbare IP samt Land","Privater Browser mit Werbe- und Tracker-Blocker"] },
+  { name:"Sprach Fox", repo:"Sprach-Fox", r:"alltag", icon:"chat", plat:["and"],
+    text:"Sprechen, übersetzen und lernen wie in der Schule.",
+    pts:["In mehrere Sprachen gleichzeitig übersetzen","Karteikasten mit Hören, Sprechen und Zeugnis","Fertige Lektionen und Lehrer-Chat"] },
+  { name:"Fox OBD", repo:"Fox-OBD", r:"werkstatt", icon:"car", plat:["and"],
+    text:"Auto-Diagnose über einen ELM327-Bluetooth-Adapter, mit Live-Daten als Rundinstrumente.",
+    pts:["Fehlercodes lesen und löschen","Steuergeräte-Scan für VW (UDS über CAN)","Diesel-Werte wie Raildruck und DPF"] },
+  { name:"Fox Stanze", repo:"Fox-Stanze", r:"werkstatt", icon:"press", plat:["and"],
+    text:"Helfer für die Flachbettstanze (Wellpappe): Rüsten, Schicht, Wissen und Rechner.",
+    pts:["Rüstblatt pro Artikel mit Verlauf und QR-Etikett","Schichtbericht mit Statistik, PDF und CSV","Restzeit-Rechner mit Erinnerung"] }
+];
+
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const PLAT = { and:["and","Android"], win:["win","Windows"] };
+
+function card(a) {
+  const dl = a.dl || GH + a.repo + "/releases/latest";
+  return `<article class="card">
+    <div class="card-top">
+      <div class="glyph"><svg><use href="#i-${a.icon}"/></svg></div>
+      <div><h3>${esc(a.name)}</h3>
+        <div class="plats">${a.plat.map(p => `<span class="plat ${PLAT[p][0]}">${PLAT[p][1]}</span>`).join("")}</div></div>
+    </div>
+    <p>${esc(a.text)}</p>
+    <ul>${a.pts.map(p => `<li>${esc(p)}</li>`).join("")}</ul>
+    <div class="actions">
+      <a class="btn primary" href="${dl}" target="_blank" rel="noopener"><svg><use href="#i-down"/></svg>Herunterladen</a>
+      <a class="btn ghost" href="${GH + a.repo}" target="_blank" rel="noopener"><svg><use href="#i-gh"/></svg>Code</a>
+    </div>
+  </article>`;
+}
+
+let filter = "alle";
+const root = document.getElementById("apps"), q = document.getElementById("q");
+
+function render() {
+  const term = q.value.trim().toLowerCase();
+  const hit = a =>
+    (filter === "alle" || a.r === filter || (filter === "windows" && a.plat.includes("win"))) &&
+    (!term || (a.name + " " + a.text + " " + a.pts.join(" ")).toLowerCase().includes(term));
+  let html = "", n = 0;
+  for (const [key, [title, sub, desc]] of Object.entries(REVIERE)) {
+    const list = APPS.filter(a => a.r === key && hit(a));
+    if (!list.length) continue;
+    n += list.length;
+    html += `<section class="revier"><h2>${esc(title)} <small>${esc(sub)}</small></h2><p>${esc(desc)}</p>
+      <div class="grid">${list.map(card).join("")}</div></section>`;
+  }
+  root.innerHTML = html;
+  document.getElementById("count").textContent = n;
+  document.getElementById("empty").hidden = n > 0;
+}
+
+document.querySelectorAll(".chip").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f;
+  document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", c === b));
+  render();
+}));
+q.addEventListener("input", render);
+render();
+</script>
+</body>
+</html>

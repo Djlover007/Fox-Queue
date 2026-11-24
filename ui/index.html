@@ -115,6 +115,21 @@
           <label>Drop-Zeit (optional) – wann es losgeht<input id="fStart" type="datetime-local" /></label>
           <label>Vorlauf in Minuten – so viel früher weckt dich Fox Queue, startet den Monitor und öffnet die Fenster<input id="fLead" type="number" min="0" max="120" value="5" /></label>
           <label>Eigene Fenster (1–20), die „Eigene Fenster öffnen“ und der Vorlauf zur Drop-Zeit aufmachen<input id="fWindows" type="number" min="1" max="20" value="1" /></label>
+          <div class="wait-group">
+            <label class="check"><input type="checkbox" id="fWait" /> Fenster warten auf den Monitor</label>
+            <p class="muted small-text hint">Die Fenster stehen bereit, laden den Shop aber erst, wenn der Monitor anschlägt – dann alle auf einmal (leicht versetzt). Bis dahin fragt nur der Monitor beim Shop nach, nicht jedes Fenster. Mit ⚡ in der Zielliste schickst du sie auch von Hand los.</p>
+            <label id="fOpenUrlWrap" class="hidden">Adresse für die Fenster (optional) – z. B. die Produktseite, während der Monitor eine andere Seite beobachtet<input id="fOpenUrl" placeholder="leer = dieselbe URL wie oben" inputmode="url" /></label>
+            <label>Nach einem Treffer
+              <select id="fAfter">
+                <option value="0">weiter beobachten</option>
+                <option value="5">Monitor 5 Minuten pausieren</option>
+                <option value="10">Monitor 10 Minuten pausieren</option>
+                <option value="15">Monitor 15 Minuten pausieren</option>
+                <option value="30">Monitor 30 Minuten pausieren</option>
+                <option value="60">Monitor 60 Minuten pausieren</option>
+              </select>
+            </label>
+          </div>
           <div class="row">
             <button class="btn primary" id="addTarget">Ziel hinzufügen</button>
             <button class="btn hidden" id="cancelEdit">Abbrechen</button>

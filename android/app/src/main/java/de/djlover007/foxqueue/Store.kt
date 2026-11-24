@@ -41,6 +41,9 @@ object Store {
         var startAt: Long = 0,      // Startzeit (ms), 0 = keine
         var dropAt: Long = 0,       // Drop-Zeit (ms) für Anzeige und Countdown; startAt liegt um den Vorlauf davor
         var windows: Int = 1,       // so viele eigene Fenster öffnet „Eigene Fenster öffnen“ / die Startzeit
+        var waitMode: Boolean = false, // Fenster warten auf den Monitor und laden den Shop erst beim Treffer
+        var openUrl: String = "",   // eigene Adresse für die Fenster, leer = url
+        var afterPause: Int = 0,    // Minuten Pause für den Monitor nach einem Treffer, 0 = weiter beobachten
         var status: String = "Wartet", var live: Boolean = false, var lastCheck: Long = 0, var lastError: String = "", var hash: String? = null,
         var backoff: Int = 0,       // wie oft in Folge „HTTP 429“ kam
         var pauseUntil: Long = 0,   // bis dahin wird das Ziel nicht geprüft (Shop bremst)
@@ -118,7 +121,8 @@ object Store {
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             targets.add(Target(o.getString("id"), o.getString("name"), o.getString("url"), o.getString("mode"), o.optString("keyword"), o.optBoolean("enabled", true), o.optString("webhook"),
-                o.optInt("intervalSec", 0), o.optLong("startAt", 0), o.optLong("dropAt", 0), o.optInt("windows", 1).coerceIn(1, MAX_WINDOWS)))
+                o.optInt("intervalSec", 0), o.optLong("startAt", 0), o.optLong("dropAt", 0), o.optInt("windows", 1).coerceIn(1, MAX_WINDOWS),
+                o.optBoolean("waitMode", false), o.optString("openUrl", ""), o.optInt("afterPause", 0).coerceIn(0, 240)))
         }
         scheduleStarts(ctx)
     }
@@ -127,7 +131,8 @@ object Store {
         val arr = JSONArray()
         targets.forEach {
             arr.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword).put("enabled", it.enabled).put("webhook", it.webhook)
-                .put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows))
+                .put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows)
+                .put("waitMode", it.waitMode).put("openUrl", it.openUrl).put("afterPause", it.afterPause))
         }
         ctx.getSharedPreferences("fox", Context.MODE_PRIVATE).edit()
             .putInt("interval", intervalSec).putString("webhook", webhook).putBoolean("notify", notify).putBoolean("sound", sound).putBoolean("vibrate", vibrate).putBoolean("openBrowser", openBrowser).putString("proxy", proxy)
@@ -148,11 +153,11 @@ object Store {
         val ts = JSONArray()
         targets.forEach {
             ts.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("mode", it.mode).put("keyword", it.keyword)
-                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError).put("pauseUntil", it.pauseUntil))
+                .put("enabled", it.enabled).put("webhook", it.webhook).put("intervalSec", it.intervalSec).put("startAt", it.startAt).put("dropAt", it.dropAt).put("windows", it.windows).put("waitMode", it.waitMode).put("openUrl", it.openUrl).put("afterPause", it.afterPause).put("status", it.status).put("live", it.live).put("lastCheck", it.lastCheck).put("lastError", it.lastError).put("pauseUntil", it.pauseUntil))
         }
         val ws = JSONArray()
         windows.values.sortedBy { it.id }.forEach {
-            ws.put(JSONObject().put("id", it.id).put("title", it.title).put("url", it.url).put("status", it.status).put("pos", it.pos).put("wait", it.wait))
+            ws.put(JSONObject().put("id", it.id).put("title", it.title).put("url", it.url).put("targetId", it.targetId).put("status", it.status).put("pos", it.pos).put("wait", it.wait))
         }
         return JSONObject()
             .put("running", running).put("platform", "android").put("windows", ws)
@@ -325,12 +330,14 @@ object Store {
                     val changed = t.hash != null && r.hash != t.hash
                     t.hash = r.hash
                     t.live = changed
+                    if (changed) onHit(ctx, t)
                     if (changed) alarm(ctx, t, "Seite hat sich geändert", "Der Inhalt ist anders als beim letzten Abruf.")
                 } else {
                     val was = t.live
                     t.live = r.live
                     if (r.live && !was) {
                         val title = when (t.mode) { "queue" -> "Warteschlange ist offen"; "keyword" -> "Text ist aufgetaucht"; else -> "Text ist verschwunden" }
+                        onHit(ctx, t)
                         alarm(ctx, t, title, "Jetzt selbst im Browser anstellen.")
                     } else if (!r.live && was) log("info", "${t.name}: ${r.status}")
                 }
@@ -350,6 +357,26 @@ object Store {
                     t.lastError = msg
                 }
             }
+    }
+
+    // ---------- Monitor & wartende Fenster ----------
+    /** Wann der Monitor eines Ziels zuletzt angeschlagen hat. Wartende Fenster (TaskActivity) schauen hier nach und laden dann den Shop. */
+    val releasedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Ist das Ziel gerade „live“ (Text da, Queue offen …)? Dann müssen neu geöffnete wartende Fenster nicht warten. */
+    fun targetLive(id: String): Boolean = synchronized(this) { targets.find { it.id == id }?.let { it.live && it.mode != "change" } ?: false }
+
+    /** Monitor hat angeschlagen (oder ⚡ von Hand): wartende Fenster losschicken, danach ggf. Pause. */
+    fun onHit(ctx: Context, t: Target, manual: Boolean = false) {
+        val waiting = windows.values.count { it.targetId == t.id && it.status == "waiting" }
+        releasedAt[t.id] = System.currentTimeMillis()
+        if (waiting > 0) log("alert", "⚡ $waiting Fenster losgeschickt: ${t.name}" + if (manual) " (von Hand)" else "")
+        else if (manual) log("info", "${t.name}: keine wartenden Fenster")
+        if (!manual && t.afterPause > 0) synchronized(this) {
+            t.pauseUntil = System.currentTimeMillis() + t.afterPause * 60_000L
+            log("info", "${t.name}: Monitor pausiert ${t.afterPause} Min. nach dem Treffer (bis " +
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t.pauseUntil)) + " Uhr)")
+        }
     }
 
     // ---------- Alarm ----------
@@ -584,12 +611,12 @@ object Store {
     }
 
     // ---------- Eigene Fenster: Übersicht fürs Dashboard ----------
-    class Win(val id: Int, @Volatile var title: String, @Volatile var url: String, @Volatile var status: String = "loading", @Volatile var pos: String = "", @Volatile var wait: String = "")
+    class Win(val id: Int, @Volatile var title: String, @Volatile var url: String, @Volatile var status: String = "loading", @Volatile var pos: String = "", @Volatile var wait: String = "", @Volatile var targetId: String = "")
     val windows = java.util.concurrent.ConcurrentHashMap<Int, Win>()
 
-    fun reportWindow(id: Int, title: String, url: String, status: String, pos: String, wait: String) {
+    fun reportWindow(id: Int, title: String, url: String, status: String, pos: String, wait: String, targetId: String = "") {
         val w = windows.getOrPut(id) { Win(id, title, url) }
-        w.title = title; w.url = url; w.status = status; w.pos = pos; w.wait = wait
+        w.title = title; w.url = url; w.status = status; w.pos = pos; w.wait = wait; w.targetId = targetId
     }
 
     private fun taskIdOf(t: android.app.ActivityManager.AppTask): Int = try {
@@ -686,7 +713,7 @@ object Store {
             } catch (e: Exception) { log("error", "Monitor konnte nicht starten: ${e.message}") }
             if (foreground) {
                 // App ist offen: Fenster direkt öffnen
-                main.post { try { TaskActivity.open(ctx, t.url, t.name, t.windows) } catch (_: Exception) { } }
+                main.post { try { TaskActivity.openFor(ctx, t, t.windows) } catch (_: Exception) { } }
             } else {
                 // Aus dem Hintergrund darf Android keine Fenster öffnen → Alarm, Antippen öffnet sie
                 if (sound) startAlarm(ctx, t, "Gleich geht's los")
@@ -702,7 +729,7 @@ object Store {
                 val n = Notification.Builder(ctx, CH_ALERT)
                     .setSmallIcon(R.drawable.ic_stat_fox)
                     .setContentTitle("⏰ Gleich geht's los: ${t.name}")
-                    .setContentText((if (t.dropAt > now) "Drop um " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t.dropAt)) + " Uhr – " else "") + "antippen öffnet ${t.windows} Fenster")
+                    .setContentText((if (t.dropAt > now) "Drop um " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t.dropAt)) + " Uhr – " else "") + "antippen öffnet ${t.windows} " + (if (t.waitMode) "wartende " else "") + "Fenster")
                     .setContentIntent(open).setDeleteIntent(silence).setAutoCancel(true)
                     .setCategory(Notification.CATEGORY_ALARM)
                     .build()

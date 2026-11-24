@@ -26,7 +26,8 @@ const bridge = (() => {
       stopAlarm: () => call('stopAlarm'),
       clearStats: () => call('clearStats'),
       openUrl: (u) => call('openUrl', u),
-      openTask: (u, n, c) => call('openTask', u, n, String(c || 1)),
+      openTask: (u, n, c, id) => call('openTask', u, n, String(c || 1), id || ''),
+      triggerTarget: (id) => call('triggerTarget', id),
       focusWindow: (id) => call('focusWindow', String(id)),
       closeWindow: (id) => call('closeWindow', String(id)),
       closeAllWindows: () => call('closeAllWindows'),
@@ -56,11 +57,17 @@ const bridge = (() => {
     installUpdate: () => ok(),
     openUrl: (u) => { window.open(u, '_blank'); return ok(); },
     // Vorschau: Fenster nur als Beispielzeilen
-    openTask: (u, n, c) => {
+    openTask: (u, n, c, id) => {
       const demo = [['queue', '1.284', 'ca. 12 Minuten'], ['captcha', '', ''], ['passed', '', ''], ['loading', '', ''], ['open', '', ''], ['killed', '', '']];
-      for (let i = 1; i <= c; i++) { const d = demo[s.windows.length % demo.length]; s.windows.push({ id: Date.now() + i, title: c > 1 ? `${n} #${i}` : n, url: u, status: d[0], pos: d[1], wait: d[2] }); }
+      const t = s.targets.find(x => x.id === id);
+      if (t && t.waitMode) { t.enabled = true; s.running = true; }
+      for (let i = 1; i <= c; i++) {
+        const d = t && t.waitMode ? ['waiting', '', ''] : demo[s.windows.length % demo.length];
+        s.windows.push({ id: Date.now() + i, title: c > 1 ? `${n} #${i}` : n, url: u, targetId: id || '', status: d[0], pos: d[1], wait: d[2] });
+      }
       return ok();
     },
+    triggerTarget: (id) => { s.windows.forEach(w => { if (w.targetId === id && w.status === 'waiting') w.status = 'loading'; }); return ok(); },
     focusWindow: ok,
     closeWindow: (id) => { s.windows = s.windows.filter(w => w.id !== id); return ok(); },
     closeAllWindows: () => { s.windows = []; return ok(); },
@@ -112,7 +119,7 @@ function nextOccurrence(day, hour, now = Date.now()) {
   if (d.getTime() <= now) d.setDate(d.getDate() + 7);
   return d.getTime();
 }
-const WIN_STATUS = { loading: ['Lädt', ''], open: ['Offen', ''], queue: ['Warteschlange', 'queue'], captcha: ['Captcha', 'warn'], passed: ['Durch', 'live'], killed: ['Angehalten', 'err'] };
+const WIN_STATUS = { waiting: ['Wartet auf Monitor', 'wait'], loading: ['Lädt', ''], open: ['Offen', ''], queue: ['Warteschlange', 'queue'], captcha: ['Captcha', 'warn'], passed: ['Durch', 'live'], killed: ['Angehalten', 'err'] };
 const openHooks = new Set();   // aufgeklappte „Discord-Kanal“-Bereiche
 let lastListHtml = '', lastFeedHtml = '', lastStatsKey = '';
 const isHook = (u) => /^https:\/\/(canary\.|ptb\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(u);
@@ -203,6 +210,7 @@ function render() {
     ['Telegram', config.tgToken && config.tgChat ? '<span class="dot ok"></span>eingerichtet' : '<span class="dot"></span>aus'],
     ['Captcha-Hinweis', config.captchaNotify !== false ? '<span class="dot ok"></span>an' + (config.captchaSound ? ' · mit Ton' : '') + (config.captchaFront !== false ? ' · Fenster kommt nach vorn' : '') : '<span class="dot"></span>aus'],
     ['Prüfung', 'bis zu 4 Ziele gleichzeitig'],
+    ['Wartende Fenster', (() => { const n = (state.windows || []).filter(w => w.status === 'waiting').length; return n ? `<span class="dot ok"></span>${n} warten auf den Monitor` : '<span class="dot"></span>keine'; })()],
   ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join('');
 
   renderUpdate();
@@ -219,7 +227,11 @@ function render() {
       : t.lastError ? `<span class="badge err">Fehler</span>`
       : t.live ? `<span class="badge live">LIVE</span>`
       : `<span class="badge">${esc(t.status || 'Wartet')}</span>`;
-    const extra = (t.intervalSec ? ` · alle ${t.intervalSec} s` : '') + (dropTime(t) > Date.now() - 600000 ? ` · ⏰ Drop ${esc(fmtDateTime(dropTime(t)))}` + (t.startAt && t.dropAt > t.startAt ? ` (Start ${Math.round((t.dropAt - t.startAt) / 60000)} Min. vorher)` : '') : '');
+    const waiting = (state.windows || []).filter(w => w.targetId === t.id && w.status === 'waiting').length;
+    const extra = (t.intervalSec ? ` · alle ${t.intervalSec} s` : '')
+      + (t.waitMode ? ` · ⏳ Fenster warten auf den Monitor${waiting ? ` (${waiting} bereit)` : ''}` : '')
+      + (t.openUrl ? ` · Fenster öffnen ${esc(t.openUrl)}` : '')
+      + (t.afterPause ? ` · nach Treffer ${t.afterPause} Min. Pause` : '') + (dropTime(t) > Date.now() - 600000 ? ` · ⏰ Drop ${esc(fmtDateTime(dropTime(t)))}` + (t.startAt && t.dropAt > t.startAt ? ` (Start ${Math.round((t.dropAt - t.startAt) / 60000)} Min. vorher)` : '') : '');
     return `<div class="target ${t.enabled ? '' : 'off'} ${editingId === t.id ? 'editing' : ''}">
       <div class="target-top"><span class="target-name">${esc(t.name)}</span>${badge}</div>
       <div class="target-url">${esc(t.url)}</div>
@@ -228,7 +240,8 @@ function render() {
         <button class="btn small" data-act="toggle" data-id="${t.id}">${t.enabled ? 'Pausieren' : 'Aktivieren'}</button>
         <button class="btn small" data-act="open" data-id="${t.id}">Öffnen</button>
         <button class="btn small" data-act="edit" data-id="${t.id}">Bearbeiten</button>
-        ${bridge.openTask ? `<span class="task-group"><input type="number" class="task-count" data-count="${t.id}" min="1" max="${TASK_MAX}" value="${clampWin(t.windows)}" title="Wie viele Fenster gleichzeitig öffnen (1–${TASK_MAX})" /><button class="btn small" data-act="task" data-id="${t.id}" title="Öffnet die Seite in eigenen Fenstern">Eigene Fenster öffnen</button></span>` : ''}
+        ${bridge.openTask ? `<span class="task-group"><input type="number" class="task-count" data-count="${t.id}" min="1" max="${TASK_MAX}" value="${clampWin(t.windows)}" title="Wie viele Fenster gleichzeitig öffnen (1–${TASK_MAX})" /><button class="btn small" data-act="task" data-id="${t.id}" title="${t.waitMode ? 'Öffnet Fenster, die erst laden, wenn der Monitor anschlägt' : 'Öffnet die Seite in eigenen Fenstern'}">${t.waitMode ? 'Wartende Fenster öffnen' : 'Eigene Fenster öffnen'}</button></span>` : ''}
+        ${bridge.triggerTarget && waiting ? `<button class="btn small bolt" data-act="bolt" data-id="${t.id}" title="Wartende Fenster sofort losschicken, ohne auf den Monitor zu warten">⚡ Jetzt losschicken</button>` : ''}
         <button class="btn small" data-act="del" data-id="${t.id}">Löschen</button>
       </div>
       <details data-id="${t.id}" ${openHooks.has(t.id) ? 'open' : ''}>
@@ -266,6 +279,7 @@ function renderWindows() {
     const [label, cls] = WIN_STATUS[w.status] || [w.status, ''];
     const info = w.status === 'queue'
       ? [w.pos ? `Platz ${esc(w.pos)}` : '', w.wait ? `Wartezeit ${esc(w.wait)}` : ''].filter(Boolean).join(' · ') || 'Platz wird nicht angezeigt'
+      : w.status === 'waiting' ? 'lädt den Shop, sobald der Monitor anschlägt'
       : w.status === 'captcha' ? 'bitte selbst lösen'
       : w.status === 'passed' ? 'Warteschlange durch – du bist dran'
       : w.status === 'killed' ? 'Android hat es geschlossen – „Zeigen“ lädt neu'
@@ -409,6 +423,7 @@ $('toggleBtn').addEventListener('click', async () => {
 
 $('clearLog').addEventListener('click', async () => { state = await bridge.clearLog(); render(); });
 
+$('fWait').addEventListener('change', () => { $('fOpenUrlWrap').classList.toggle('hidden', !$('fWait').checked); });
 $('fMode').addEventListener('change', () => {
   const m = $('fMode').value;
   $('fKeywordWrap').classList.toggle('hidden', !(m === 'keyword' || m === 'gone'));
@@ -427,6 +442,12 @@ function readForm() {
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try { new URL(url); } catch { return alert('Die URL sieht ungültig aus.'); }
   if ((mode === 'keyword' || mode === 'gone') && !keyword) return alert('Bitte den Text eingeben, auf den geachtet werden soll.');
+  const waitMode = $('fWait').checked;
+  let openUrl = waitMode ? $('fOpenUrl').value.trim() : '';
+  if (openUrl && !/^https?:\/\//i.test(openUrl)) openUrl = 'https://' + openUrl;
+  if (openUrl) { try { new URL(openUrl); } catch { return alert('Die Adresse für die Fenster sieht ungültig aus.'); } }
+  if (openUrl === url) openUrl = '';
+  const afterPause = Math.min(240, Math.max(0, parseInt($('fAfter').value, 10) || 0));
   const iv = parseInt($('fInterval').value, 10) || 0;
   if (iv && iv < 20) return alert('Das eigene Prüfintervall muss mindestens 20 Sekunden sein.');
   const dropAt = fromLocalInput($('fStart').value);
@@ -438,7 +459,7 @@ function readForm() {
   const old = editingId && state.targets.find(t => t.id === editingId);
   if (old && dropAt && old.dropAt === dropAt && !old.startAt) startAt = 0;
   return { name: name || new URL(url).host, url, mode, keyword: (mode === 'keyword' || mode === 'gone') ? keyword : '', webhook,
-    intervalSec: iv, startAt, dropAt, windows: clampWin($('fWindows').value) };
+    intervalSec: iv, startAt, dropAt, windows: clampWin($('fWindows').value), waitMode, openUrl, afterPause };
 }
 
 function setForm(t) {
@@ -450,6 +471,10 @@ function setForm(t) {
   $('fStart').value = t && dropTime(t) > Date.now() ? toLocalInput(dropTime(t)) : '';
   $('fLead').value = t && t.dropAt && t.startAt ? Math.max(0, Math.round((t.dropAt - t.startAt) / 60000)) : LEAD_DEFAULT;
   $('fWindows').value = t ? clampWin(t.windows) : 1;
+  $('fWait').checked = !!(t && t.waitMode);
+  $('fOpenUrl').value = t ? (t.openUrl || '') : '';
+  $('fAfter').value = String(t && [5, 10, 15, 30, 60].includes(t.afterPause) ? t.afterPause : 0);
+  $('fWait').dispatchEvent(new Event('change'));
   $('fMode').dispatchEvent(new Event('change'));
   $('formTitle').textContent = t ? `„${t.name}“ bearbeiten` : 'Neues Ziel';
   $('addTarget').textContent = t ? 'Änderungen speichern' : 'Ziel hinzufügen';
@@ -488,8 +513,9 @@ $('targetList').addEventListener('click', async (e) => {
     if (inp) inp.value = n;
     lastListHtml = '';
     if (n !== t.windows) await bridge.updateTarget(t.id, { windows: n });
-    state = await bridge.openTask(t.url, t.name, n) || state;
+    state = await bridge.openTask(t.openUrl || t.url, t.name, n, t.id) || state;
   }
+  if (b.dataset.act === 'bolt' && bridge.triggerTarget) state = await bridge.triggerTarget(t.id) || state;
   if (b.dataset.act === 'edit') {
     setForm(t);
     document.querySelector('.main').scrollTop = 0; window.scrollTo(0, 0);
@@ -506,6 +532,8 @@ $('targetList').addEventListener('click', async (e) => {
     openHooks.delete(t.id);
     lastListHtml = '';
   }
+  // Fokus vom Knopf nehmen, sonst zeichnet die Liste nicht neu (z. B. ⚡ nach „Wartende Fenster öffnen“)
+  if (document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur();
   render();
 });
 
@@ -591,7 +619,7 @@ $('winArrange').addEventListener('click', async () => { if (bridge.arrangeWindow
 // ---- Ziele übertragen (Export/Import als Text) ----
 const MODES = ['queue', 'keyword', 'gone', 'change'];
 function exportTargets(targets) {
-  return JSON.stringify({ foxqueue: 1, targets: targets.map(t => ({ name: t.name, url: t.url, mode: t.mode, keyword: t.keyword || '', webhook: t.webhook || '', intervalSec: t.intervalSec || 0, windows: clampWin(t.windows) })) });
+  return JSON.stringify({ foxqueue: 1, targets: targets.map(t => ({ name: t.name, url: t.url, mode: t.mode, keyword: t.keyword || '', webhook: t.webhook || '', intervalSec: t.intervalSec || 0, windows: clampWin(t.windows), waitMode: !!t.waitMode, openUrl: t.openUrl || '', afterPause: t.afterPause || 0 })) });
 }
 /** Liest einen Export-Text. Gibt { add: [...], skipped, invalid } zurück oder wirft bei unlesbarem Text. */
 function parseImport(text, existing) {
@@ -606,7 +634,8 @@ function parseImport(text, existing) {
       && (!(t.mode === 'keyword' || t.mode === 'gone') || (typeof t.keyword === 'string' && t.keyword.trim()));
     if (!ok) { out.invalid++; continue; }
     const c = { name: String(t.name || new URL(t.url).host).slice(0, 80), url: t.url, mode: t.mode, keyword: String(t.keyword || ''),
-      webhook: isHook(String(t.webhook || '')) ? t.webhook : '', intervalSec: Math.max(0, parseInt(t.intervalSec, 10) || 0), startAt: 0, dropAt: 0, windows: clampWin(t.windows) };
+      webhook: isHook(String(t.webhook || '')) ? t.webhook : '', intervalSec: Math.max(0, parseInt(t.intervalSec, 10) || 0), startAt: 0, dropAt: 0, windows: clampWin(t.windows),
+      waitMode: !!t.waitMode, openUrl: typeof t.openUrl === 'string' && /^https?:\/\/\S+$/i.test(t.openUrl) ? t.openUrl : '', afterPause: Math.min(240, Math.max(0, parseInt(t.afterPause, 10) || 0)) };
     if (c.intervalSec && c.intervalSec < 20) c.intervalSec = 20;
     if (seen.has(key(c))) { out.skipped++; continue; }
     seen.add(key(c)); out.add.push(c);

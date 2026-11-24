@@ -66,7 +66,7 @@ class MainActivity : Activity() {
                 // Startzeit-Meldung angetippt: Alarm aus, Fenster des Ziels öffnen
                 Store.stopAlarm()
                 val id = intent.getStringExtra("targetId")
-                synchronized(Store) { Store.targets.find { it.id == id } }?.let { TaskActivity.open(this, it.url, it.name, it.windows) }
+                synchronized(Store) { Store.targets.find { it.id == id } }?.let { TaskActivity.openFor(this, it, it.windows) }
             }
             ACTION_AUTO_OPEN -> {
                 // Von der Vollbild-Benachrichtigung: Bildschirm an, ggf. Entsperren anfordern, Seite öffnen. Alarm läuft weiter.
@@ -148,6 +148,9 @@ class MainActivity : Activity() {
             if (o.has("startAt")) t.startAt = maxOf(0L, o.optLong("startAt", 0))
             if (o.has("dropAt")) t.dropAt = maxOf(0L, o.optLong("dropAt", 0))
             if (o.has("windows")) t.windows = o.optInt("windows", 1).coerceIn(1, Store.MAX_WINDOWS)
+            if (o.has("waitMode")) t.waitMode = o.optBoolean("waitMode", false)
+            if (o.has("openUrl")) t.openUrl = o.optString("openUrl", "").let { if (it.startsWith("http")) it else "" }
+            if (o.has("afterPause")) t.afterPause = o.optInt("afterPause", 0).coerceIn(0, 240)
         }
 
         @JavascriptInterface fun saveConfig(json: String): String {
@@ -267,10 +270,24 @@ class MainActivity : Activity() {
         }
 
         /** Öffnet die Seite in [count] eigenen Fenstern/Tasks (siehe TaskActivity). */
-        @JavascriptInterface fun openTask(url: String, name: String, count: String): String {
+        @JavascriptInterface fun openTask(url: String, name: String, count: String, targetId: String): String {
             val n = (count.toIntOrNull() ?: 1).coerceIn(1, Store.MAX_WINDOWS)
-            if (url.startsWith("http")) runOnUiThread { TaskActivity.open(ctx, url, name, n) }
-            if (n > 1) Store.log("info", "$n Fenster geöffnet: $name")
+            val t = synchronized(Store) { Store.targets.find { it.id == targetId } }
+            if (t != null && t.waitMode) {
+                // Wartende Fenster brauchen einen laufenden Monitor
+                synchronized(Store) { if (!t.enabled) { t.enabled = true; t.pauseUntil = 0 } }
+                Store.save(ctx)
+                if (!Store.running) start()
+            }
+            if (t != null) runOnUiThread { TaskActivity.openFor(ctx, t, n) }
+            else if (url.startsWith("http")) runOnUiThread { TaskActivity.open(ctx, url, name, n) }
+            if (n > 1 || t?.waitMode == true) Store.log("info", "$n Fenster " + (if (t?.waitMode == true) "warten auf den Monitor" else "geöffnet") + ": $name")
+            return Store.stateJson()
+        }
+
+        /** ⚡ Wartende Fenster eines Ziels sofort losschicken. */
+        @JavascriptInterface fun triggerTarget(id: String): String {
+            synchronized(Store) { Store.targets.find { it.id == id } }?.let { Store.onHit(ctx, it, manual = true) }
             return Store.stateJson()
         }
 

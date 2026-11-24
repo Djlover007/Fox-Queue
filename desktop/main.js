@@ -101,13 +101,13 @@ function load() {
   try {
     const d = JSON.parse(fs.readFileSync(DATA_FILE(), 'utf8'));
     state.config = { ...state.config, ...(d.config || {}) };
-    state.targets = (d.targets || []).map(t => ({ webhook: '', intervalSec: 0, startAt: 0, dropAt: 0, windows: 1, ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
+    state.targets = (d.targets || []).map(t => ({ webhook: '', intervalSec: 0, startAt: 0, dropAt: 0, windows: 1, waitMode: false, openUrl: '', afterPause: 0, ...t, status: 'Wartet', live: false, lastCheck: 0, lastError: '' }));
     state.events = Array.isArray(d.events) ? d.events : [];
     try { setProxy(state.config.proxy); } catch (e) { log('error', `Proxy ungültig: ${e.message}`); }
   } catch { /* erster Start */ }
 }
 function save() {
-  const targets = state.targets.map(({ id, name, url, mode, keyword, enabled, webhook, intervalSec, startAt, dropAt, windows }) => ({ id, name, url, mode, keyword, enabled, webhook: webhook || '', intervalSec: intervalSec || 0, startAt: startAt || 0, dropAt: dropAt || 0, windows: windows || 1 }));
+  const targets = state.targets.map(({ id, name, url, mode, keyword, enabled, webhook, intervalSec, startAt, dropAt, windows, waitMode, openUrl, afterPause }) => ({ id, name, url, mode, keyword, enabled, webhook: webhook || '', intervalSec: intervalSec || 0, startAt: startAt || 0, dropAt: dropAt || 0, windows: windows || 1, waitMode: !!waitMode, openUrl: openUrl || '', afterPause: afterPause || 0 }));
   fs.mkdirSync(path.dirname(DATA_FILE()), { recursive: true });
   fs.writeFileSync(DATA_FILE(), JSON.stringify({ config: state.config, targets, events: state.events }, null, 2));
 }
@@ -219,6 +219,7 @@ async function checkOne(t) {
       if (t.mode === 'change') {
         if (t.hash && r.hash !== t.hash) {
           t.live = true;
+          onHit(t);
           await alarm(t, 'Seite hat sich geändert', 'Der Inhalt ist anders als beim letzten Abruf.');
         } else t.live = false;
         t.hash = r.hash;
@@ -227,6 +228,7 @@ async function checkOne(t) {
         t.live = r.live;
         if (r.live && !was) {
           const titles = { queue: 'Warteschlange ist offen', keyword: 'Text ist aufgetaucht', gone: 'Text ist verschwunden' };
+          onHit(t);
           await alarm(t, titles[t.mode], `Jetzt selbst im Browser anstellen: ${t.url}`);
         } else if (!r.live && was) {
           log('info', `${t.name}: ${r.status}`);
@@ -287,6 +289,9 @@ function targetExtras(p) {
   if ('startAt' in p) out.startAt = Math.max(0, Number(p.startAt) || 0);
   if ('dropAt' in p) out.dropAt = Math.max(0, Number(p.dropAt) || 0); // Drop-Zeit, nur für Anzeige und Countdown
   if ('windows' in p) out.windows = Math.min(TASK_MAX, Math.max(1, parseInt(p.windows, 10) || 1));
+  if ('waitMode' in p) out.waitMode = !!p.waitMode;                       // Fenster warten auf den Monitor
+  if ('openUrl' in p) out.openUrl = /^https?:\/\//.test(p.openUrl || '') ? String(p.openUrl) : ''; // eigene Adresse für die Fenster
+  if ('afterPause' in p) out.afterPause = Math.min(240, Math.max(0, parseInt(p.afterPause, 10) || 0)); // Pause nach Treffer (Min.)
   return out;
 }
 ipcMain.handle('addTarget', (_e, t) => {
@@ -327,6 +332,7 @@ ipcMain.handle('testPassed', async () => {
   return snapshot();
 });
 ipcMain.handle('stopAlarm', () => { stopAlarm(); return snapshot(); });
+ipcMain.handle('triggerTarget', (_e, id) => { const t = state.targets.find(x => x.id === id); if (t) onHit(t, { manual: true }); return snapshot(); });
 ipcMain.handle('clearStats', () => { state.events = []; save(); return snapshot(); });
 ipcMain.handle('checkUpdate', () => { checkUpdate(); return snapshot(); });
 ipcMain.handle('installUpdate', () => { installUpdate(); return snapshot(); });
@@ -334,19 +340,19 @@ ipcMain.handle('openUrl', (_e, u) => { if (/^https?:\/\//.test(u)) shell.openExt
 
 // ---- Zielseite in eigenen Fenstern (eigener Eintrag in der Taskleiste) ----
 const TASK_MAX = 20;
-const taskWins = new Map(); // id → { id, w, title, url, queue, captcha, passed, pos, wait }
+const taskWins = new Map(); // id → { id, w, title, url, targetId, waiting, queue, captcha, passed, pos, wait }
 let nextWinId = 1;
 // Seiten-Erkennung (gleiche Datei wie auf Android). Liest nur, löst und klickt nichts.
 let DETECT_JS = '';
 try { DETECT_JS = fs.readFileSync(path.join(__dirname, '..', 'ui', 'page-detect.js'), 'utf8'); } catch { }
 
-const winStatus = (i) => i.captcha ? 'captcha' : i.queue ? 'queue' : i.passed ? 'passed' : (i.w.webContents.isLoading() ? 'loading' : 'open');
+const winStatus = (i) => i.waiting ? 'waiting' : i.captcha ? 'captcha' : i.queue ? 'queue' : i.passed ? 'passed' : (i.w.webContents.isLoading() ? 'loading' : 'open');
 function listWindows() {
   return [...taskWins.values()].filter(i => !i.w.isDestroyed())
-    .map(i => ({ id: i.id, title: i.title, url: i.w.webContents.getURL() || i.url, status: winStatus(i), pos: i.pos, wait: i.wait }));
+    .map(i => ({ id: i.id, title: i.title, url: i.waiting ? i.url : (i.w.webContents.getURL() || i.url), targetId: i.targetId || '', status: winStatus(i), pos: i.pos, wait: i.wait }));
 }
 const showWin = (w) => { if (w.isDestroyed()) return; if (w.isMinimized()) w.restore(); w.show(); w.focus(); };
-const hookFor = (url) => { const t = state.targets.find(x => x.url === url); return (t && t.webhook) || state.config.webhook; };
+const hookFor = (url, targetId) => { const t = state.targets.find(x => (targetId && x.id === targetId) || x.url === url); return (t && t.webhook) || state.config.webhook; };
 
 /** Beobachtet ein Zielfenster: Captcha, Warteschlange (Adresse oder Seiteninhalt), Platz – und „Du bist dran“. */
 function watchWindow(info) {
@@ -374,7 +380,7 @@ function watchWindow(info) {
       n.on('click', () => showWin(w));
       n.show();
     }
-    remote(hookFor(url), 'Du bist dran', title, 'Die Warteschlange ist durch – du bist im Shop.', url);
+    remote(hookFor(url, info.targetId), 'Du bist dran', title, 'Die Warteschlange ist durch – du bist im Shop.', url);
   };
 
   // Warteschlange unter eigener Adresse (Queue-it): sofort beim Seitenwechsel erkennen
@@ -389,7 +395,7 @@ function watchWindow(info) {
   w.webContents.on('did-navigate-in-page', onNav);
 
   const timer = setInterval(async () => {
-    if (w.isDestroyed() || !DETECT_JS) return;
+    if (w.isDestroyed() || !DETECT_JS || info.waiting) return; // Warteseite: nichts zu prüfen
     let d;
     try { d = await w.webContents.executeJavaScript(DETECT_JS, true); } catch { return; }
     if (!d || typeof d !== 'object') return;
@@ -423,7 +429,7 @@ function watchWindow(info) {
         n.on('click', () => showWin(w));
         n.show();
       }
-      remote(hookFor(url), 'Captcha wartet', title, 'In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.', url);
+      remote(hookFor(url, info.targetId), 'Captcha wartet', title, 'In einem Fox-Queue-Fenster ist ein Captcha aufgetaucht – bitte selbst lösen.', url);
       // Fenster von selbst nach vorn holen – außer du arbeitest gerade in einem Fenster,
       // das schon durch die Warteschlange ist oder selbst ein Captcha zeigt (dann nur blinken)
       if (state.config.captchaFront !== false) {
@@ -442,7 +448,11 @@ function watchWindow(info) {
   w.on('closed', () => { clearInterval(timer); if (ringingWin === w) ringingWin = null; taskWins.delete(info.id); });
 }
 
-function openTaskWindows(url, name, count) {
+/**
+ * Öffnet [count] Fenster. Mit wait: true zeigen sie erst die Warteseite und laden den Shop,
+ * sobald der Monitor des Ziels anschlägt (releaseWindows) – so fragt nur der Monitor beim Shop nach.
+ */
+function openTaskWindows(url, name, count, { targetId = '', wait = false } = {}) {
   if (!/^https?:\/\//.test(url)) return;
   const n = Math.min(TASK_MAX, Math.max(1, parseInt(count, 10) || 1), Math.max(0, TASK_MAX * 2 - taskWins.size));
   if (n < 1) { log('error', 'Zu viele Fenster offen – schließe erst welche.'); return; }
@@ -460,12 +470,48 @@ function openTaskWindows(url, name, count) {
     w.on('page-title-updated', (e) => e.preventDefault()); // Titel „#1, #2 …“ behalten
     // Links, die ein neues Fenster wollen, im selben Fenster öffnen
     w.webContents.setWindowOpenHandler(({ url: u }) => { if (/^https?:\/\//.test(u)) w.loadURL(u); return { action: 'deny' }; });
-    const info = { id: nextWinId++, w, title, url, queue: false, captcha: false, passed: false, pos: '', wait: '' };
+    const info = { id: nextWinId++, w, title, url, targetId, waiting: wait, queue: false, captcha: false, passed: false, pos: '', wait: '' };
     taskWins.set(info.id, info);
     watchWindow(info);
-    w.loadURL(url);
+    if (wait) w.loadFile(path.join(__dirname, '..', 'ui', 'wait.html'), { query: { name: title } });
+    else w.loadURL(url);
   }
-  if (n > 1) log('info', `${n} Fenster geöffnet: ${label}`);
+  if (n > 1 || wait) log('info', `${n} Fenster ${wait ? 'warten auf den Monitor' : 'geöffnet'}: ${label}`);
+}
+
+/** Fenster eines Ziels öffnen – mit dessen Adresse für die Fenster und, falls eingestellt, im Wartemodus. */
+function openForTarget(t, count) {
+  const wait = !!t.waitMode;
+  if (wait) {
+    // Ohne laufenden Monitor würden die Fenster ewig warten
+    if (!t.enabled) { t.enabled = true; t.pauseUntil = 0; save(); }
+    start();
+  }
+  openTaskWindows(t.openUrl || t.url, t.name, count || t.windows || 1, { targetId: t.id, wait });
+  // Ist das Ziel gerade schon „live“, gleich losschicken
+  if (wait && t.live && t.mode !== 'change') releaseWindows(t);
+}
+
+/** Wartende Fenster eines Ziels den Shop laden lassen – leicht versetzt, nicht alle in derselben Millisekunde. */
+function releaseWindows(t) {
+  const list = [...taskWins.values()].filter(i => i.waiting && i.targetId === t.id && !i.w.isDestroyed());
+  list.forEach((i, k) => {
+    i.waiting = false;
+    setTimeout(() => { if (!i.w.isDestroyed()) i.w.loadURL(i.url); }, k * 250 + Math.random() * 250);
+  });
+  return list.length;
+}
+
+/** Monitor hat angeschlagen (oder ⚡ von Hand): wartende Fenster losschicken, danach ggf. Pause. */
+function onHit(t, { manual = false } = {}) {
+  const n = releaseWindows(t);
+  if (n) log('alert', `⚡ ${n} Fenster losgeschickt: ${t.name}${manual ? ' (von Hand)' : ''}`);
+  else if (manual) log('info', `${t.name}: keine wartenden Fenster`);
+  if (!manual && t.afterPause > 0) {
+    t.pauseUntil = Date.now() + t.afterPause * 60000;
+    log('info', `${t.name}: Monitor pausiert ${t.afterPause} Min. nach dem Treffer (bis ${new Date(t.pauseUntil).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr)`);
+  }
+  return n;
 }
 
 /** Alle Zielfenster als Raster über den Bildschirm verteilen. */
@@ -483,7 +529,11 @@ function arrangeWindows() {
   });
 }
 
-ipcMain.handle('openTask', (_e, u, name, count) => { openTaskWindows(u, name, count); return snapshot(); });
+ipcMain.handle('openTask', (_e, u, name, count, targetId) => {
+  const t = targetId && state.targets.find(x => x.id === targetId);
+  if (t) openForTarget(t, count); else openTaskWindows(u, name, count);
+  return snapshot();
+});
 ipcMain.handle('focusWindow', (_e, id) => { const i = taskWins.get(Number(id)); if (i) showWin(i.w); return snapshot(); });
 ipcMain.handle('closeWindow', (_e, id) => { const i = taskWins.get(Number(id)); if (i && !i.w.isDestroyed()) i.w.destroy(); return snapshot(); });
 ipcMain.handle('closeAllWindows', () => { for (const i of [...taskWins.values()]) if (!i.w.isDestroyed()) i.w.destroy(); return snapshot(); });
@@ -500,8 +550,8 @@ function fireDueStarts() {
     log('alert', `⏰ Startzeit erreicht: ${t.name}`);
     if (!t.enabled) t.enabled = true;
     start();
-    openTaskWindows(t.url, t.name, t.windows || 1);
-    if (state.config.notify && Notification.isSupported()) new Notification({ title: `⏰ Gleich geht's los: ${t.name}`, body: (t.dropAt > now ? `Drop um ${new Date(t.dropAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr. ` : '') + `Monitor läuft, ${t.windows || 1} Fenster geöffnet.` }).show();
+    openForTarget(t, t.windows || 1);
+    if (state.config.notify && Notification.isSupported()) new Notification({ title: `⏰ Gleich geht's los: ${t.name}`, body: (t.dropAt > now ? `Drop um ${new Date(t.dropAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr. ` : '') + `Monitor läuft, ${t.windows || 1} Fenster ${t.waitMode ? 'warten auf den Treffer' : 'geöffnet'}.` }).show();
   }
 }
 

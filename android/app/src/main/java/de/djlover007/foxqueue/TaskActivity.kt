@@ -47,6 +47,11 @@ class TaskActivity : Activity() {
     private var notQueuePolls = 0
     private var passed = false
 
+    // Wartemodus: Fenster zeigt die Warteseite und lädt den Shop erst, wenn der Monitor des Ziels anschlägt
+    private var targetId = ""
+    private var waiting = false
+    private var waitSince = 0L
+
     private fun taskLabel(): String = intent.getIntExtra(EXTRA_NR, 0).let { if (it > 0) "$name #$it" else name }
 
     /** Queue-it oder eigene Queue-Adresse des Shops (queue.shop.de, warteraum.shop.de …)? */
@@ -108,16 +113,36 @@ class TaskActivity : Activity() {
             else -> "open"
         }
         Store.reportWindow(taskId, taskLabel(), lastUrl.ifEmpty { url }, status,
-            if (inQueue) d.optString("pos") else "", if (inQueue) d.optString("wait") else "")
+            if (inQueue) d.optString("pos") else "", if (inQueue) d.optString("wait") else "", targetId)
     }
 
     /** Schaut alle 2 Sekunden auf die Seite. */
     private val poll = object : Runnable {
         override fun run() {
             val w = web
-            if (w != null && detectJs.isNotEmpty()) try { w.evaluateJavascript(detectJs) { onDetect(it) } } catch (_: Exception) { }
+            if (waiting) Store.reportWindow(taskId, taskLabel(), url, "waiting", "", "", targetId)
+            else if (w != null && detectJs.isNotEmpty()) try { w.evaluateJavascript(detectJs) { onDetect(it) } } catch (_: Exception) { }
             handler.postDelayed(this, 2000)
         }
+    }
+
+    /** Schaut alle 300 ms, ob der Monitor angeschlagen hat (nur im Wartemodus). */
+    private val waitPoll = object : Runnable {
+        override fun run() {
+            if (!waiting) return
+            if ((Store.releasedAt[targetId] ?: 0L) > waitSince) release()
+            else handler.postDelayed(this, 300)
+        }
+    }
+
+    /** Shop laden – je nach Fensternummer leicht versetzt, damit nicht alle Fenster in derselben Millisekunde anfragen. */
+    private fun release() {
+        if (!waiting) return
+        waiting = false
+        loading = true
+        val nr = maxOf(1, intent.getIntExtra(EXTRA_NR, 1))
+        handler.postDelayed({ web?.loadUrl(url) }, (nr - 1) * 250L + (Math.random() * 250).toLong())
+        Store.reportWindow(taskId, taskLabel(), url, "loading", "", "", targetId)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -130,6 +155,9 @@ class TaskActivity : Activity() {
         url = intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("http") } ?: run { finishAndRemoveTask(); return }
         name = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { Uri.parse(url).host ?: "Seite" }
         lastUrl = url
+        targetId = intent.getStringExtra(EXTRA_TARGET).orEmpty()
+        waiting = intent.getBooleanExtra(EXTRA_WAIT, false)
+        waitSince = System.currentTimeMillis()
 
         // Name in der App-Übersicht, damit man die Fenster auseinanderhalten kann
         val title = "🦊 ${taskLabel()}"
@@ -144,12 +172,20 @@ class TaskActivity : Activity() {
             hostQueue = savedInstanceState.getBoolean("hostQueue")
             pageQueue = savedInstanceState.getBoolean("pageQueue")
             passed = savedInstanceState.getBoolean("passed")
+            waiting = savedInstanceState.getBoolean("waiting")
+            waitSince = savedInstanceState.getLong("waitSince", waitSince)
         }
         CookieManager.getInstance().setAcceptCookie(true)
-        buildWeb(savedInstanceState, url)
-        Store.reportWindow(taskId, taskLabel(), url, "loading", "", "")
+        buildWeb(savedInstanceState, if (waiting) waitPage() else url)
+        Store.reportWindow(taskId, taskLabel(), url, if (waiting) "waiting" else "loading", "", "", targetId)
         handler.postDelayed(poll, 3000)
+        if (waiting) {
+            // Ziel ist schon „live“ → gar nicht erst warten
+            if (Store.targetLive(targetId)) release() else handler.post(waitPoll)
+        }
     }
+
+    private fun waitPage() = "file:///android_asset/wait.html?name=" + Uri.encode(taskLabel())
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun buildWeb(saved: Bundle?, load: String) {
@@ -182,7 +218,7 @@ class TaskActivity : Activity() {
 
             /** Android hat den Browser-Prozess dieses Fensters beendet (Speicher knapp) → Fenster neu aufbauen. */
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                val back = lastUrl.ifEmpty { url }
+                val back = if (waiting) waitPage() else lastUrl.ifEmpty { url }
                 handler.post { rebuild(back) }
                 return true
             }
@@ -219,6 +255,8 @@ class TaskActivity : Activity() {
         outState.putBoolean("hostQueue", hostQueue)
         outState.putBoolean("pageQueue", pageQueue)
         outState.putBoolean("passed", passed)
+        outState.putBoolean("waiting", waiting)
+        outState.putLong("waitSince", waitSince)
         web?.saveState(outState)
     }
 
@@ -246,15 +284,23 @@ class TaskActivity : Activity() {
         const val EXTRA_URL = "url"
         const val EXTRA_NAME = "name"
         const val EXTRA_NR = "nr"
+        const val EXTRA_TARGET = "targetId"
+        const val EXTRA_WAIT = "wait"
+
+        /** Fenster eines Ziels: mit dessen Adresse für die Fenster und, falls eingestellt, im Wartemodus. */
+        fun openFor(ctx: Context, t: Store.Target, count: Int = t.windows) =
+            open(ctx, t.openUrl.ifBlank { t.url }, t.name, count, t.id, t.waitMode)
 
         /** Startet die Seite [count]-mal, jedes Mal als eigenen Task (eigene Karte in der App-Übersicht). */
-        fun open(ctx: Context, url: String, name: String, count: Int = 1) {
+        fun open(ctx: Context, url: String, name: String, count: Int = 1, targetId: String = "", wait: Boolean = false) {
             val n = count.coerceIn(1, Store.MAX_WINDOWS)
             for (i in 1..n) {
                 val intent = Intent(ctx, TaskActivity::class.java).apply {
                     putExtra(EXTRA_URL, url)
                     putExtra(EXTRA_NAME, name)
                     putExtra(EXTRA_NR, if (n > 1) i else 0)
+                    putExtra(EXTRA_TARGET, targetId)
+                    putExtra(EXTRA_WAIT, wait)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 }

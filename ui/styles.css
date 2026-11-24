@@ -169,6 +169,10 @@ h2 .nav-count { background: var(--panel2); color: var(--accent); border-radius: 
 .badge.err { background: rgba(255,99,82,.14); color: var(--red); }
 .badge.queue { background: rgba(242,140,40,.18); color: var(--accent); }
 .badge.warn { background: rgba(242,207,91,.16); color: var(--yellow); }
+.badge.wait { background: rgba(127,180,216,.16); color: var(--blue); }
+.btn.bolt { border-color: var(--accent) !important; color: var(--accent); font-weight: 650; }
+.wait-group { border: 1px solid var(--line); border-radius: var(--r-row); padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.wait-group .hint { margin: 0; }
 
 .android-only { display: none !important; }
 body.android .android-only { display: flex !important; }

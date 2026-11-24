@@ -154,3 +154,49 @@ test('Typische Drop-Zeiten: häufigstes Zeitfenster zuerst, nächster Termin lie
     window.close();
   }
 });
+
+test('Monitor & wartende Fenster: Fenster warten, ⚡ schickt sie los, Export behält die Einstellung', async () => {
+  const { window, $, tick, errors } = await loadUi();
+  try {
+    $('fName').value = 'Sneaker Drop'; $('fUrl').value = 'shop.de/api/stock'; $('fMode').value = 'change';
+    $('fWindows').value = '3';
+    assert.equal($('fOpenUrlWrap').classList.contains('hidden'), true, 'Adresse für Fenster erst mit Wartemodus');
+    $('fWait').checked = true; $('fWait').dispatchEvent(new window.Event('change'));
+    assert.equal($('fOpenUrlWrap').classList.contains('hidden'), false);
+    $('fOpenUrl').value = 'shop.de/produkt'; $('fAfter').value = '10';
+    $('addTarget').click(); await tick();
+    assert.match($('targetList').innerHTML, /Fenster warten auf den Monitor/);
+    assert.match($('targetList').innerHTML, /nach Treffer 10 Min\. Pause/);
+    assert.match($('targetList').innerHTML, /Wartende Fenster öffnen/);
+    assert.equal($('targetList').querySelector('button[data-act="bolt"]'), null, 'ohne wartende Fenster kein ⚡');
+
+    // Wartende Fenster öffnen → alle „Wartet auf Monitor“, Monitor läuft
+    $('targetList').querySelector('button[data-act="task"]').click(); await tick();
+    assert.equal($('winList').querySelectorAll('.badge.wait').length, 3);
+    assert.match($('winList').innerHTML, /lädt den Shop, sobald der Monitor anschlägt/);
+    assert.equal($('runState').textContent, 'Läuft');
+    assert.match($('setupKv').innerHTML, /3 warten auf den Monitor/);
+
+    // ⚡ von Hand → keine wartenden Fenster mehr
+    $('targetList').querySelector('button[data-act="bolt"]').click(); await tick();
+    assert.equal($('winList').querySelectorAll('.badge.wait').length, 0);
+    assert.equal($('targetList').querySelector('button[data-act="bolt"]'), null);
+
+    // Bearbeiten zeigt die Einstellungen wieder
+    $('targetList').querySelector('button[data-act="edit"]').click(); await tick();
+    assert.equal($('fWait').checked, true);
+    assert.equal($('fOpenUrl').value, 'https://shop.de/produkt');
+    assert.equal($('fAfter').value, '10');
+    $('cancelEdit').click(); await tick();
+    assert.equal($('fWait').checked, false);
+
+    // Export/Import nimmt Wartemodus, Fenster-Adresse und Pause mit
+    $('xferExport').click();
+    const r = window.eval('parseImport')($('xferText').value, []);
+    assert.equal(r.add.length, 1);
+    assert.deepEqual([r.add[0].waitMode, r.add[0].openUrl, r.add[0].afterPause], [true, 'https://shop.de/produkt', 10]);
+    assert.deepEqual(errors, []);
+  } finally {
+    window.close();
+  }
+});

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wartet auf den Monitor</title>
+  <style>
+    @font-face { font-family: "Bricolage"; src: url("fonts/bricolage.woff2") format("woff2"); font-weight: 200 800; }
+    @font-face { font-family: "Instrument"; src: url("fonts/instrument.woff2") format("woff2"); font-weight: 400 700; }
+    * { box-sizing: border-box; margin: 0; }
+    html, body { height: 100%; }
+    body {
+      background: #171210; color: #f4eadc; font-family: "Instrument", "Segoe UI", system-ui, sans-serif;
+      display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px;
+    }
+    .box { max-width: 420px; }
+    .fox { font-size: 64px; animation: bob 2.4s ease-in-out infinite; }
+    h1 { font-family: "Bricolage", "Segoe UI", system-ui, sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -.4px; margin: 14px 0 6px; }
+    .name { color: #f28c28; font-weight: 600; margin-bottom: 14px; word-break: break-word; }
+    p { color: #ab9c8c; font-size: 14.5px; line-height: 1.5; }
+    .clock { font-family: "Bricolage", system-ui, sans-serif; font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 18px 0 4px; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9bd36b; margin-right: 7px; animation: pulse 1.8s infinite; }
+    @keyframes bob { 50% { transform: translateY(-6px); } }
+    @keyframes pulse { 50% { opacity: .35; } }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="fox">🦊</div>
+    <h1>Wartet auf den Monitor</h1>
+    <div class="name" id="name"></div>
+    <p><span class="dot"></span>Dieses Fenster lädt den Shop erst, wenn der Monitor anschlägt – dann geht es von selbst los.</p>
+    <div class="clock" id="clock">00:00</div>
+    <p>So fragt nur der Monitor beim Shop nach, nicht jedes Fenster einzeln.</p>
+  </div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    document.getElementById('name').textContent = q.get('name') || '';
+    const since = Date.now();
+    const p = (n) => String(n).padStart(2, '0');
+    setInterval(() => {
+      const s = Math.floor((Date.now() - since) / 1000);
+      document.getElementById('clock').textContent = (s >= 3600 ? p(Math.floor(s / 3600)) + ':' : '') + p(Math.floor(s / 60) % 60) + ':' + p(s % 60);
+    }, 1000);
+  </script>
+</body>
+</html>
